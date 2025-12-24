@@ -1,0 +1,145 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:17-alpine
+    container_name: scalpaiboard-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-scalpaiboard}
+      POSTGRES_USER: ${DB_USER:-scalpaiboard}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-scalpaiboard_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scalpaiboard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scalpaiboard-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: scalpaiboard-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - scalpaiboard-network
+
+  # Go Backend (REST API + WebSocket)
+  backend-go:
+    build:
+      context: ./backend-go
+      dockerfile: Dockerfile
+    container_name: scalpaiboard-go
+    ports:
+      - "3001:3001"
+      - "50051:50051"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-scalpaiboard}
+      DB_USER: ${DB_USER:-scalpaiboard}
+      DB_PASSWORD: ${DB_PASSWORD:-scalpaiboard_dev}
+      REDIS_URL: redis://redis:6379
+      GRPC_CSHARP_ADDR: backend-csharp:50052
+      JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        ["CMD", "wget", "-q", "--spider", "http://localhost:3001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - scalpaiboard-network
+
+  # C# Backend (Alert Engine + AI)
+  backend-csharp:
+    build:
+      context: ./backend-csharp
+      dockerfile: Dockerfile
+    container_name: scalpaiboard-csharp
+    ports:
+      - "3002:3002"
+      - "50052:50052"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=postgres;Database=${DB_NAME:-scalpaiboard};Username=${DB_USER:-scalpaiboard};Password=${DB_PASSWORD:-scalpaiboard_dev};Port=5432"
+      Redis__Connection: redis:6379
+      ASPNETCORE_ENVIRONMENT: Development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - scalpaiboard-network
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: scalpaiboard-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+      VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001/ws}
+    depends_on:
+      - backend-go
+    restart: unless-stopped
+    networks:
+      - scalpaiboard-network
+
+  # Nginx Reverse Proxy (Production)
+  nginx:
+    image: nginx:alpine
+    container_name: scalpaiboard-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend-go
+      - frontend
+    restart: unless-stopped
+    networks:
+      - scalpaiboard-network
+    profiles:
+      - production
+
+networks:
+  scalpaiboard-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
