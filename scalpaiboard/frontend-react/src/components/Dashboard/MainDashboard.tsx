@@ -11,15 +11,24 @@ export default function MainDashboard() {
   const [activeTab, setActiveTab] = useState<'charts' | 'table'>('charts')
 
   useEffect(() => {
-    fetchCoins()
-  }, [fetchCoins])
+    if (coins.length === 0) {
+      fetchCoins()
+    }
+  }, [coins.length, fetchCoins])
+
+  const getChange24h = (symbol: string, fallback: number) => {
+    const wsValue = prices.get(symbol)?.change24h
+    const parsed = wsValue ? Number.parseFloat(wsValue) : fallback
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
 
   // Calculate market summary
   const marketSummary = {
     totalCoins: coins.length,
-    gainers: coins.filter(c => (prices.get(c.symbol)?.change24h || c.change24h) > 0).length,
-    losers: coins.filter(c => (prices.get(c.symbol)?.change24h || c.change24h) < 0).length
+    gainers: coins.filter((c) => getChange24h(c.symbol, c.change24h) > 0).length,
+    losers: coins.filter((c) => getChange24h(c.symbol, c.change24h) < 0).length,
   }
+
 
   return (
     <div className="h-full flex flex-col">

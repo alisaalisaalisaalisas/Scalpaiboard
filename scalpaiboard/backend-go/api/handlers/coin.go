@@ -90,6 +90,8 @@ func (h *CoinHandler) GetCandles(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	exchange := c.DefaultQuery("exchange", "binance")
 
+	endTimeSec, _ := strconv.ParseInt(c.DefaultQuery("endTime", "0"), 10, 64)
+
 	if limit > 500 {
 		limit = 500
 	}
@@ -99,11 +101,11 @@ func (h *CoinHandler) GetCandles(c *gin.Context) {
 
 	switch exchange {
 	case "binance":
-		candles, err = fetchBinanceCandles(symbol, interval, limit)
+		candles, err = fetchBinanceCandles(symbol, interval, limit, endTimeSec)
 	case "bybit":
-		candles, err = fetchBybitCandles(symbol, interval, limit)
+		candles, err = fetchBybitCandles(symbol, interval, limit, endTimeSec)
 	default:
-		candles, err = fetchBinanceCandles(symbol, interval, limit)
+		candles, err = fetchBinanceCandles(symbol, interval, limit, endTimeSec)
 	}
 
 	if err != nil {
@@ -150,9 +152,12 @@ func (h *CoinHandler) GetOrderbook(c *gin.Context) {
 
 // ========== Binance Public API ==========
 
-func fetchBinanceCandles(symbol, interval string, limit int) ([]map[string]interface{}, error) {
+func fetchBinanceCandles(symbol, interval string, limit int, endTimeSec int64) ([]map[string]interface{}, error) {
 	url := fmt.Sprintf("https://api.binance.com/api/v3/klines?symbol=%s&interval=%s&limit=%d",
 		symbol, interval, limit)
+	if endTimeSec > 0 {
+		url += fmt.Sprintf("&endTime=%d", endTimeSec*1000)
+	}
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -212,12 +217,15 @@ func fetchBinanceOrderbook(symbol string, limit int) (map[string]interface{}, er
 
 // ========== Bybit Public API ==========
 
-func fetchBybitCandles(symbol, interval string, limit int) ([]map[string]interface{}, error) {
+func fetchBybitCandles(symbol, interval string, limit int, endTimeSec int64) ([]map[string]interface{}, error) {
 	// Convert interval format (1h -> 60)
 	bybitInterval := convertToBybitInterval(interval)
 
 	url := fmt.Sprintf("https://api.bybit.com/v5/market/kline?category=spot&symbol=%s&interval=%s&limit=%d",
 		symbol, bybitInterval, limit)
+	if endTimeSec > 0 {
+		url += fmt.Sprintf("&end=%d", endTimeSec*1000)
+	}
 
 	resp, err := http.Get(url)
 	if err != nil {

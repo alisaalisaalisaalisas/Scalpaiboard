@@ -44,6 +44,9 @@ func main() {
 	alertHandler := handlers.NewAlertHandler(alertService)
 	watchlistHandler := handlers.NewWatchlistHandler(watchlistService)
 	wsHandler := handlers.NewWebSocketHandler(exchangeService)
+	authHandler := handlers.NewAuthHandler(db)
+	aiProviderHandler := handlers.NewAIProviderHandler(db)
+	aiChatHandler := handlers.NewAIChatHandler(db)
 
 	// Setup Gin router
 	if os.Getenv("LOG_LEVEL") != "debug" {
@@ -71,6 +74,10 @@ func main() {
 		})
 	})
 
+	// Auth routes (public)
+	router.POST("/api/auth/register", authHandler.Register)
+	router.POST("/api/auth/login", authHandler.Login)
+
 	// Public routes
 	router.GET("/api/coins", coinHandler.ListCoins)
 	router.GET("/api/coins/:symbol", coinHandler.GetCoin)
@@ -84,6 +91,10 @@ func main() {
 	protected := router.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
 	{
+		// Auth (protected)
+		protected.GET("/auth/me", authHandler.GetMe)
+		protected.POST("/auth/refresh", authHandler.RefreshToken)
+
 		// Watchlist
 		protected.GET("/watchlist", watchlistHandler.GetWatchlist)
 		protected.POST("/watchlist", watchlistHandler.AddToWatchlist)
@@ -96,14 +107,17 @@ func main() {
 		protected.DELETE("/alerts/:id", alertHandler.DeleteAlert)
 		protected.GET("/alerts/:id/history", alertHandler.GetAlertHistory)
 
-		// AI Chat (routes to C# backend via gRPC)
-		protected.POST("/ai/chat", handlers.HandleAIChat)
+		// AI Chat
+		protected.POST("/ai/chat", aiChatHandler.HandleChat)
 		protected.GET("/ai/conversations", handlers.ListConversations)
-		protected.GET("/ai/providers", handlers.ListAIProviders)
-		protected.POST("/ai/providers", handlers.AddAIProvider)
-		protected.PUT("/ai/providers/:id", handlers.UpdateAIProvider)
-		protected.DELETE("/ai/providers/:id", handlers.DeleteAIProvider)
-		protected.POST("/ai/providers/:id/test", handlers.TestAIProvider)
+		protected.GET("/ai/providers", aiProviderHandler.ListProviders)
+		protected.POST("/ai/providers", aiProviderHandler.AddProvider)
+		protected.PUT("/ai/providers/:id", aiProviderHandler.UpdateProvider)
+		protected.DELETE("/ai/providers/:id", aiProviderHandler.DeleteProvider)
+		protected.POST("/ai/providers/:id/test", aiProviderHandler.TestProvider)
+		protected.POST("/ai/providers/fetch-models", aiProviderHandler.FetchModels)
+		protected.GET("/ai/providers/:id/models", aiProviderHandler.ListProviderModels)
+
 	}
 
 	// Start server

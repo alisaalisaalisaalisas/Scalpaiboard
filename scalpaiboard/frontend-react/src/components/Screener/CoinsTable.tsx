@@ -1,7 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowUpDown, Bell, ChevronDown, ChevronUp, Star } from 'lucide-react'
 import { useWebSocketStore } from '../../store/websocketStore'
+import { useAuthStore } from '../../store/authStore'
+import { addToWatchlist, getWatchlist, removeFromWatchlist } from '../../services/api'
 import { Coin } from '../../types'
-import { ArrowUpDown, Star, Bell, ChevronUp, ChevronDown } from 'lucide-react'
+
 
 interface CoinsTableProps {
   coins: Coin[]
@@ -11,11 +15,93 @@ type SortField = 'symbol' | 'price' | 'change24h' | 'volume24h'
 type SortOrder = 'asc' | 'desc'
 
 export default function CoinsTable({ coins }: CoinsTableProps) {
+  const navigate = useNavigate()
+  const { isAuthenticated } = useAuthStore()
+
   const [sortField, setSortField] = useState<SortField>('volume24h')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [search, setSearch] = useState('')
-  
-  const prices = useWebSocketStore(state => state.prices)
+
+  const prices = useWebSocketStore((state) => state.prices)
+
+  const [watchlistCoinIds, setWatchlistCoinIds] = useState<Set<number>>(new Set())
+  const [watchlistLoading, setWatchlistLoading] = useState(false)
+  const [watchlistMutatingCoinId, setWatchlistMutatingCoinId] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setWatchlistCoinIds(new Set())
+      return
+    }
+
+    let cancelled = false
+
+    const loadWatchlist = async () => {
+      setWatchlistLoading(true)
+      try {
+        const items = await getWatchlist()
+        if (cancelled) return
+        setWatchlistCoinIds(new Set(items.map((i) => i.coinId)))
+      } catch (error) {
+        if (!cancelled) console.error('Failed to load watchlist:', error)
+      } finally {
+        if (!cancelled) setWatchlistLoading(false)
+      }
+    }
+
+    loadWatchlist()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated])
+
+  const handleToggleWatchlist = async (coin: Coin) => {
+    if (!isAuthenticated) {
+      window.alert('Please sign in to use the watchlist.')
+      return
+    }
+
+    const isInWatchlist = watchlistCoinIds.has(coin.id)
+
+    setWatchlistMutatingCoinId(coin.id)
+    try {
+      if (isInWatchlist) {
+        await removeFromWatchlist(coin.id)
+        setWatchlistCoinIds((prev) => {
+          const next = new Set(prev)
+          next.delete(coin.id)
+          return next
+        })
+      } else {
+        await addToWatchlist(coin.id, coin.symbol)
+        setWatchlistCoinIds((prev) => {
+          const next = new Set(prev)
+          next.add(coin.id)
+          return next
+        })
+      }
+    } catch (error) {
+      console.error('Failed to update watchlist:', error)
+    } finally {
+      setWatchlistMutatingCoinId(null)
+    }
+  }
+
+  const handleCreateAlert = (coin: Coin) => {
+    if (!isAuthenticated) {
+      window.alert('Please sign in to create alerts.')
+      return
+    }
+
+    navigate('/alerts', {
+      state: {
+        openCreateModal: true,
+        coinId: coin.id,
+      },
+    })
+  }
+
 
   // Enrich coins with real-time data
   const enrichedCoins = useMemo(() => {
@@ -60,10 +146,9 @@ export default function CoinsTable({ coins }: CoinsTableProps) {
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return <ArrowUpDown className="w-4 h-4 text-dark-500" />
-    return sortOrder === 'asc' 
-      ? <ChevronUp className="w-4 h-4 text-primary-500" />
-      : <ChevronDown className="w-4 h-4 text-primary-500" />
+    return sortOrder === 'asc' ? <ChevronUp className="w-4 h-4 text-primary-500" /> : <ChevronDown className="w-4 h-4 text-primary-500" />
   }
+
 
   return (
     <div className="card">
@@ -149,10 +234,22 @@ export default function CoinsTable({ coins }: CoinsTableProps) {
                 </td>
                 <td className="text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="Add to watchlist">
-                      <Star className="w-4 h-4 text-dark-400 hover:text-yellow-500" />
+                    <button
+                      className="p-2 hover:bg-dark-600 rounded-lg transition-colors disabled:opacity-50"
+                      title={isAuthenticated ? (watchlistCoinIds.has(coin.id) ? 'Remove from watchlist' : 'Add to watchlist') : 'Sign in to use watchlist'}
+                      onClick={() => handleToggleWatchlist(coin)}
+                      disabled={watchlistLoading || watchlistMutatingCoinId === coin.id}
+                    >
+                      <Star
+                        className={`w-4 h-4 ${watchlistCoinIds.has(coin.id) ? 'text-yellow-500' : 'text-dark-400 hover:text-yellow-500'}`}
+                        fill={watchlistCoinIds.has(coin.id) ? 'currentColor' : 'none'}
+                      />
                     </button>
-                    <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="Create alert">
+                    <button
+                      className="p-2 hover:bg-dark-600 rounded-lg transition-colors"
+                      title={isAuthenticated ? 'Create alert' : 'Sign in to create alerts'}
+                      onClick={() => handleCreateAlert(coin)}
+                    >
                       <Bell className="w-4 h-4 text-dark-400 hover:text-primary-500" />
                     </button>
                   </div>

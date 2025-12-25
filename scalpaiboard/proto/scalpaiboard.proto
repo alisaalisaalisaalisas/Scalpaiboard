@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package scalpaiboard;
+
+option go_package = "github.com/scalpaiboard/backend/proto";
+option csharp_namespace = "Scalpaiboard.Grpc";
+
+// ========== Alert Service ==========
+
+service AlertService {
+  // Evaluate a single alert condition
+  rpc EvaluateAlert(EvaluateAlertRequest) returns (EvaluateAlertResponse);
+  
+  // Stream alert triggers in real-time
+  rpc StreamAlertTriggers(StreamAlertsRequest) returns (stream AlertTrigger);
+}
+
+message EvaluateAlertRequest {
+  string user_id = 1;
+  int32 alert_id = 2;
+  string symbol = 3;
+  double current_price = 4;
+  double current_volume = 5;
+}
+
+message EvaluateAlertResponse {
+  bool triggered = 1;
+  string condition = 2;
+  double threshold = 3;
+  double actual_value = 4;
+}
+
+message StreamAlertsRequest {
+  string user_id = 1;
+}
+
+message AlertTrigger {
+  int32 alert_id = 1;
+  string symbol = 2;
+  string condition_type = 3;
+  double condition_value = 4;
+  double triggered_at_price = 5;
+  int64 timestamp = 6;
+}
+
+// ========== AI Service ==========
+
+service AIService {
+  // Send a chat message and get streaming response
+  rpc Chat(ChatRequest) returns (stream ChatResponse);
+  
+  // Get conversation history
+  rpc GetConversations(GetConversationsRequest) returns (ConversationsResponse);
+  
+  // Delete a conversation
+  rpc DeleteConversation(DeleteConversationRequest) returns (DeleteConversationResponse);
+}
+
+message ChatRequest {
+  string user_id = 1;
+  string message = 2;
+  optional string conversation_id = 3;
+  optional int32 provider_id = 4;
+}
+
+message ChatResponse {
+  string content = 1;
+  bool is_complete = 2;
+  optional string tool_call = 3;
+  optional string tool_result = 4;
+  optional int32 tokens_used = 5;
+  optional double cost = 6;
+}
+
+message GetConversationsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+}
+
+message ConversationsResponse {
+  repeated Conversation conversations = 1;
+  int32 total = 2;
+}
+
+message Conversation {
+  string id = 1;
+  string title = 2;
+  int64 created_at = 3;
+  int64 updated_at = 4;
+  int32 message_count = 5;
+}
+
+message DeleteConversationRequest {
+  string user_id = 1;
+  string conversation_id = 2;
+}
+
+message DeleteConversationResponse {
+  bool success = 1;
+}
+
+// ========== AI Provider Management ==========
+
+service AIProviderService {
+  // List configured providers for user
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+  
+  // Add a new provider
+  rpc AddProvider(AddProviderRequest) returns (AddProviderResponse);
+  
+  // Update provider settings
+  rpc UpdateProvider(UpdateProviderRequest) returns (UpdateProviderResponse);
+  
+  // Delete a provider
+  rpc DeleteProvider(DeleteProviderRequest) returns (DeleteProviderResponse);
+  
+  // Test provider connection
+  rpc TestProvider(TestProviderRequest) returns (TestProviderResponse);
+}
+
+message ListProvidersRequest {
+  string user_id = 1;
+}
+
+message ListProvidersResponse {
+  repeated AIProvider providers = 1;
+}
+
+message AIProvider {
+  int32 id = 1;
+  string provider_type = 2;
+  string provider_name = 3;
+  string model_name = 4;
+  bool is_active = 5;
+  bool is_default = 6;
+  int32 max_tokens = 7;
+  double temperature = 8;
+  optional double monthly_budget = 9;
+  double monthly_spent = 10;
+}
+
+message AddProviderRequest {
+  string user_id = 1;
+  string provider_type = 2;
+  string provider_name = 3;
+  string api_key = 4;
+  string model_name = 5;
+  int32 max_tokens = 6;
+  double temperature = 7;
+  bool is_default = 8;
+  optional double monthly_budget = 9;
+}
+
+message AddProviderResponse {
+  bool success = 1;
+  int32 provider_id = 2;
+  string error = 3;
+}
+
+message UpdateProviderRequest {
+  string user_id = 1;
+  int32 provider_id = 2;
+  optional string provider_name = 3;
+  optional string api_key = 4;
+  optional string model_name = 5;
+  optional int32 max_tokens = 6;
+  optional double temperature = 7;
+  optional bool is_active = 8;
+  optional bool is_default = 9;
+  optional double monthly_budget = 10;
+}
+
+message UpdateProviderResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message DeleteProviderRequest {
+  string user_id = 1;
+  int32 provider_id = 2;
+}
+
+message DeleteProviderResponse {
+  bool success = 1;
+}
+
+message TestProviderRequest {
+  string user_id = 1;
+  int32 provider_id = 2;
+}
+
+message TestProviderResponse {
+  bool success = 1;
+  string message = 2;
+  int32 response_time_ms = 3;
+}

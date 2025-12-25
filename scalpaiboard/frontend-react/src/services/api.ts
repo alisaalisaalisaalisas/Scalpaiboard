@@ -10,14 +10,30 @@ const client = axios.create({
   }
 })
 
+const getStoredAuthToken = (): string | null => {
+  const persisted = localStorage.getItem('scalpaiboard-auth')
+  if (persisted) {
+    try {
+      const parsed = JSON.parse(persisted)
+      const token = parsed?.state?.token
+      if (typeof token === 'string' && token.length > 0) return token
+    } catch {
+      // ignore
+    }
+  }
+
+  return localStorage.getItem('token')
+}
+
 // Add auth token to requests if available
 client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = getStoredAuthToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
   return config
 })
+
 
 // ========== Coins ==========
 
@@ -33,12 +49,22 @@ export const getCoin = async (symbol: string): Promise<Coin> => {
   return response.data
 }
 
-export const getCandles = async (symbol: string, interval = '1h', limit = 100): Promise<Candle[]> => {
+export const getCandles = async (
+  symbol: string,
+  interval = '1h',
+  limit = 100,
+  endTime?: number
+): Promise<Candle[]> => {
   const response = await client.get(`/api/coins/${symbol}/candles`, {
-    params: { interval, limit }
+    params: {
+      interval,
+      limit,
+      ...(typeof endTime === 'number' ? { endTime } : {}),
+    }
   })
   return response.data.candles
 }
+
 
 export const getOrderbook = async (symbol: string, limit = 20): Promise<Orderbook> => {
   const response = await client.get(`/api/coins/${symbol}/orderbook`, {
@@ -107,10 +133,81 @@ export const addAIProvider = async (provider: {
   await client.post('/api/ai/providers', provider)
 }
 
+export const updateAIProvider = async (
+  id: number,
+  updates: {
+    providerName?: string
+    apiKey?: string
+    modelName?: string
+    maxTokens?: number
+    temperature?: number
+    isActive?: boolean
+    isDefault?: boolean
+    monthlyBudget?: number
+  }
+): Promise<void> => {
+  await client.put(`/api/ai/providers/${id}`, updates)
+}
+
+export type AIProviderModelDetail = {
+  id: string
+  contextLength?: number
+}
+
+export const getProviderModelsById = async (id: number): Promise<string[]> => {
+  const data = await getProviderModelsByIdDetailed(id)
+  return data.models
+}
+
+export const getProviderModelsByIdDetailed = async (
+  id: number
+): Promise<{ models: string[]; details: AIProviderModelDetail[] }> => {
+  try {
+    const response = await client.get(`/api/ai/providers/${id}/models`)
+    return {
+      models: response.data.models || [],
+      details: response.data.details || [],
+    }
+  } catch (error: any) {
+    // Backwards-compatible fallback if backend hasn't been restarted/updated yet.
+    if (error?.response?.status === 404) {
+      const data = await getAIProviders()
+      const configured = data.configured || []
+      const provider = configured.find((p: any) => p.id === id)
+      const providerType = provider?.providerType
+      const available = (data.available || []).find((p: any) => p.type === providerType)
+      return { models: available?.models || [], details: [] }
+    }
+    throw error
+  }
+}
+
+
 export const testAIProvider = async (id: number): Promise<{ status: string, message: string }> => {
   const response = await client.post(`/api/ai/providers/${id}/test`)
   return response.data
 }
+
+export const deleteAIProvider = async (id: number): Promise<void> => {
+  await client.delete(`/api/ai/providers/${id}`)
+}
+
+export const fetchProviderModels = async (providerType: string, apiKey: string): Promise<string[]> => {
+  const response = await client.post('/api/ai/providers/fetch-models', { providerType, apiKey })
+  return response.data.models
+}
+
+export const fetchProviderModelsDetailed = async (
+  providerType: string,
+  apiKey: string
+): Promise<{ models: string[]; details: AIProviderModelDetail[] }> => {
+  const response = await client.post('/api/ai/providers/fetch-models', { providerType, apiKey })
+  return {
+    models: response.data.models || [],
+    details: response.data.details || [],
+  }
+}
+
 
 export const sendAIMessage = async (message: string, providerId?: number, conversationId?: string): Promise<ReadableStream> => {
   const response = await fetch(`${API_URL}/api/ai/chat`, {
@@ -123,3 +220,6 @@ export const sendAIMessage = async (message: string, providerId?: number, conver
   })
   return response.body!
 }
+
+// Default export for auth store
+export default client
