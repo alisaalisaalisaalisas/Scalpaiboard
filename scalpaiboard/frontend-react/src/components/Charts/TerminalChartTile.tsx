@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction } from 'react'
 import { createChart, IChartApi, ISeriesApi, LineStyle } from 'lightweight-charts'
 import { Star } from 'lucide-react'
 
@@ -315,7 +315,7 @@ export default function TerminalChartTile({ config, market, height, selected, on
       if (reachedHistoryStartRef.current) return
 
       const now = Date.now()
-      if (now - lastLoadMoreAtRef.current < 800) return
+      if (now - lastLoadMoreAtRef.current < 250) return
 
       const existing = candlesRef.current
       if (existing.length < 20) return
@@ -328,7 +328,7 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
       try {
         const endTime = Math.max(0, Math.floor(first.time) - 1)
-        const olderRaw = await getCandles(market.symbol, config.timeframe, 300, endTime, {
+        const olderRaw = await getCandles(market.symbol, config.timeframe, 500, endTime, {
           exchange: market.exchange,
           marketType: toMarketTypeParam(market.marketType),
         })
@@ -370,13 +370,23 @@ export default function TerminalChartTile({ config, market, height, selected, on
         }
       } finally {
         loadMoreInFlightRef.current = false
+
+        // If user is still far left, keep prefetching.
+        try {
+          const r: any = chart.timeScale().getVisibleLogicalRange?.()
+          if (r && typeof r.from === 'number' && r.from < 60 && !reachedHistoryStartRef.current) {
+            window.setTimeout(() => void loadMore(), 0)
+          }
+        } catch {
+          // ignore
+        }
       }
     }
 
     const timeScale: any = chart.timeScale()
     const onRange = (range: any) => {
       if (!range || typeof range.from !== 'number') return
-      if (range.from < 20) void loadMore()
+      if (range.from < 60) void loadMore()
     }
 
     timeScale?.subscribeVisibleLogicalRangeChange?.(onRange)
@@ -956,7 +966,7 @@ export default function TerminalChartTile({ config, market, height, selected, on
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="px-4 py-3 flex items-start justify-between border-b border-dark-700 gap-3">
+      <div className="px-3 py-2 flex items-start justify-between border-b border-dark-700 gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-white">{titleLeft}</span>
@@ -997,7 +1007,17 @@ export default function TerminalChartTile({ config, market, height, selected, on
         </div>
       </div>
 
-      <div className="relative" onMouseDown={onSelect} onDoubleClick={onOpenFocus}>
+      <div
+        className="relative"
+        onMouseDown={(e: ReactMouseEvent) => {
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault()
+            onOpenFocus()
+            return
+          }
+          onSelect()
+        }}
+      >
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-dark-800/60 z-10">
             <div className="animate-spin w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full" />

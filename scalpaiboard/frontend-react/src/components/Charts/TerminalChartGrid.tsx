@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { MarketItem } from '../../types'
 import { useTerminalMarketStore } from '../../store/terminalMarketStore'
@@ -38,7 +38,7 @@ export default function TerminalChartGrid() {
   const subscribe = useTerminalTickerStore((s) => s.subscribe)
   const unsubscribe = useTerminalTickerStore((s) => s.unsubscribe)
 
-  const { cols, size } = getLayoutSize(layout)
+  const { cols, rows, size } = getLayoutSize(layout)
 
   useEffect(() => {
     if (markets.length === 0 && !loading) {
@@ -134,8 +134,50 @@ export default function TerminalChartGrid() {
     }
   }, [connect, connected])
 
+  const charts = useTerminalChartStore((s) => s.charts)
+
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const [chartHeight, setChartHeight] = useState(220)
+
   useEffect(() => {
-    const ids = pageSlice.map((m) => m.marketId)
+    const el = viewportRef.current
+    if (!el) return
+
+    const compute = () => {
+      const GAP = 16
+      const PAD = 32
+      const HEADER_APPROX = 96
+
+      const available = Math.max(0, el.clientHeight - PAD)
+      const totalPerRow = Math.floor((available - GAP * Math.max(0, rows - 1)) / Math.max(1, rows))
+      const nextChartHeight = Math.min(260, Math.max(140, totalPerRow - HEADER_APPROX))
+      setChartHeight((prev) => (Math.abs(prev - nextChartHeight) > 4 ? nextChartHeight : prev))
+    }
+
+    compute()
+    const ro = new ResizeObserver(() => compute())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [rows])
+
+  const marketById = useMemo(() => {
+    const map = new Map<string, MarketItem>()
+    for (const m of markets) map.set(m.marketId, m)
+    return map
+  }, [markets])
+
+  const displayedIds = useMemo(() => {
+    const ids: string[] = []
+    for (let idx = 0; idx < size; idx += 1) {
+      const id = getChartIdForIndex(idx)
+      const cfg = charts[id]
+      if (cfg?.marketId) ids.push(cfg.marketId)
+    }
+    return Array.from(new Set(ids))
+  }, [charts, size])
+
+  useEffect(() => {
+    const ids = displayedIds
 
     const prev = lastSubscribed.current
     if (prev.length > 0) unsubscribe(prev)
@@ -146,15 +188,11 @@ export default function TerminalChartGrid() {
     return () => {
       if (ids.length > 0) unsubscribe(ids)
     }
-  }, [pageSlice, subscribe, unsubscribe])
-
-  const charts = useTerminalChartStore((s) => s.charts)
-
-  const tileHeight = 320
+  }, [displayedIds, subscribe, unsubscribe])
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex-1 min-h-0 overflow-auto p-4">
+      <div ref={viewportRef} className="flex-1 min-h-0 overflow-auto p-4">
         {error && <div className="mb-3 text-sm text-red-400">{error}</div>}
         {loading && markets.length === 0 ? (
           <div className="text-sm text-dark-400">Loading markets…</div>
@@ -166,10 +204,10 @@ export default function TerminalChartGrid() {
             {Array.from({ length: size }).map((_, idx) => {
               const id = getChartIdForIndex(idx)
               const cfg = charts[id]
-              const market = pageSlice[idx]
+              const market = cfg ? marketById.get(cfg.marketId) || pageSlice[idx] : pageSlice[idx]
               if (!cfg || !market) {
                 return (
-                  <div key={id} className="bg-dark-800 border border-dark-700 rounded-xl" style={{ height: tileHeight }} />
+                  <div key={id} className="bg-dark-800 border border-dark-700 rounded-xl" style={{ height: chartHeight + 96 }} />
                 )
               }
 
@@ -178,10 +216,10 @@ export default function TerminalChartGrid() {
                   key={id}
                   config={cfg}
                   market={market}
-                  height={tileHeight}
+                  height={chartHeight}
                   selected={selectedChartId === id}
                   onSelect={() => setSelectedChartId(id)}
-                   onOpenFocus={() => openFocusFromTile(id)}
+                  onOpenFocus={() => openFocusFromTile(id)}
 
                 />
               )

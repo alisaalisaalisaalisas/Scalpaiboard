@@ -31,7 +31,8 @@ export default function FocusModeFullscreenChart() {
   const charts = useTerminalChartStore((s) => s.charts)
   const closeFocus = useTerminalChartStore((s) => s.closeFocus)
   const globalTimeframe = useTerminalChartStore((s) => s.globalTimeframe)
-  const setChartTimeframeOverride = useTerminalChartStore((s) => s.setChartTimeframeOverride)
+  const getFocusTimeframe = useTerminalChartStore((s) => s.getFocusTimeframe)
+  const setFocusTimeframe = useTerminalChartStore((s) => s.setFocusTimeframe)
 
   const markets = useTerminalMarketStore((s) => s.markets)
 
@@ -45,43 +46,47 @@ export default function FocusModeFullscreenChart() {
     return charts[focus.chartId] || null
   }, [charts, focus.chartId, focus.kind, focus.open])
 
-  const tileMarket = useMemo(() => {
-    if (!tileConfig) return null
-    return markets.find((m) => m.marketId === tileConfig.marketId) || null
-  }, [markets, tileConfig])
 
   const marketMarket = useMemo(() => {
     if (!focus.open || focus.kind !== 'market' || !focus.marketId) return null
     return markets.find((m) => m.marketId === focus.marketId) || null
   }, [focus.kind, focus.marketId, focus.open, markets])
 
-  const [marketConfig, setMarketConfig] = useState<ChartConfig | null>(null)
+  const [focusConfig, setFocusConfig] = useState<ChartConfig | null>(null)
 
   useEffect(() => {
-    if (!focus.open || focus.kind !== 'market') {
-      setMarketConfig(null)
+    if (!focus.open) {
+      setFocusConfig(null)
       return
     }
 
-    if (!marketMarket) {
-      setMarketConfig(null)
+    const base =
+      focus.kind === 'tile'
+        ? tileConfig
+          ? { ...tileConfig, chartId: 'focus' }
+          : null
+        : marketMarket
+          ? defaultFocusConfig(marketMarket, globalTimeframe)
+          : null
+
+    if (!base) {
+      setFocusConfig(null)
       return
     }
 
-    setMarketConfig((prev) => {
-      const base = prev || defaultFocusConfig(marketMarket, globalTimeframe)
+    const tfPref = getFocusTimeframe(base.marketId)
+    const tf = (tfPref || base.timeframe) as Timeframe
+
+    setFocusConfig((prev) => {
+      if (prev && prev.marketId === base.marketId) return prev
       return {
         ...base,
-        marketId: marketMarket.marketId,
-        symbol: marketMarket.symbol,
-        exchange: marketMarket.exchange,
-        marketType: marketMarket.marketType,
-        timeframe: globalTimeframe,
-        timeframeMode: 'global',
-        drawingStateId: `${marketMarket.marketId}:${globalTimeframe}`,
+        timeframe: tf,
+        timeframeMode: 'override',
+        drawingStateId: `${base.marketId}:${tf}`,
       }
     })
-  }, [focus.kind, focus.open, globalTimeframe, marketMarket])
+  }, [focus.kind, focus.open, getFocusTimeframe, globalTimeframe, marketMarket, tileConfig])
 
   useEffect(() => {
     if (!focus.open) return
@@ -92,16 +97,21 @@ export default function FocusModeFullscreenChart() {
     return () => window.removeEventListener('keydown', onKey)
   }, [closeFocus, focus.open])
 
-  const [chartHeight, setChartHeight] = useState(() => Math.max(320, window.innerHeight - 120))
+  const [chartHeight, setChartHeight] = useState(() => Math.max(280, window.innerHeight - 340))
   useEffect(() => {
     if (!focus.open) return
-    const onResize = () => setChartHeight(Math.max(320, window.innerHeight - 120))
+    const onResize = () => setChartHeight(Math.max(280, window.innerHeight - 340))
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [focus.open])
 
-  const renderConfig = focus.kind === 'tile' ? tileConfig : marketConfig
-  const renderMarket = focus.kind === 'tile' ? tileMarket : marketMarket
+  const renderConfig = focusConfig
+
+  const renderMarket = useMemo(() => {
+    const id = focusConfig?.marketId
+    if (!id) return null
+    return markets.find((m) => m.marketId === id) || null
+  }, [focusConfig?.marketId, markets])
 
   useEffect(() => {
     if (!focus.open) return
@@ -112,54 +122,28 @@ export default function FocusModeFullscreenChart() {
 
   useEffect(() => {
     if (!focus.open) return
-    const id = renderConfig?.marketId
+    const id = focusConfig?.marketId
     if (!id) return
     subscribe([id])
     return () => unsubscribe([id])
-  }, [focus.open, renderConfig?.marketId, subscribe, unsubscribe])
+  }, [focus.open, focusConfig?.marketId, subscribe, unsubscribe])
 
-  const activeTf = renderConfig?.timeframe
+  const activeTf = focusConfig?.timeframe
 
   const setTimeframe = (tf: Timeframe) => {
-    if (!renderConfig) return
+    const id = focusConfig?.marketId
+    if (!id) return
 
-    if (focus.kind === 'tile' && focus.chartId) {
-      setChartTimeframeOverride(focus.chartId, tf)
-      return
-    }
-
-    if (focus.kind === 'market') {
-      setMarketConfig((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          timeframe: tf,
-          timeframeMode: 'override',
-          drawingStateId: `${prev.marketId}:${tf}`,
-        }
-      })
-    }
-  }
-
-  const useGlobalTimeframe = () => {
-    if (!renderConfig) return
-
-    if (focus.kind === 'tile' && focus.chartId) {
-      setChartTimeframeOverride(focus.chartId, null)
-      return
-    }
-
-    if (focus.kind === 'market') {
-      setMarketConfig((prev) => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          timeframe: globalTimeframe,
-          timeframeMode: 'global',
-          drawingStateId: `${prev.marketId}:${globalTimeframe}`,
-        }
-      })
-    }
+    setFocusTimeframe(id, tf)
+    setFocusConfig((prev) => {
+      if (!prev) return prev
+      return {
+        ...prev,
+        timeframe: tf,
+        timeframeMode: 'override',
+        drawingStateId: `${id}:${tf}`,
+      }
+    })
   }
 
   if (!focus.open || !renderConfig || !renderMarket) return null
@@ -173,18 +157,6 @@ export default function FocusModeFullscreenChart() {
               Focus mode: {renderMarket.symbol} • {renderMarket.contractTag}
             </div>
             <div className="mt-2 flex items-center gap-1 flex-wrap">
-              <button
-                type="button"
-                onClick={useGlobalTimeframe}
-                className={`px-2 py-1 rounded-md border text-[11px] transition-colors ${
-                  renderConfig.timeframeMode === 'global'
-                    ? 'bg-primary-600 border-primary-500 text-white'
-                    : 'bg-dark-900/40 border-dark-700 text-dark-300 hover:text-white hover:bg-dark-700'
-                }`}
-                title="Use global timeframe"
-              >
-                Global
-              </button>
               {TIMEFRAMES.map((tf) => (
                 <button
                   key={tf}
@@ -217,7 +189,7 @@ export default function FocusModeFullscreenChart() {
             selected
             onSelect={() => void 0}
             onOpenFocus={closeFocus}
-            onConfigChange={focus.kind === 'market' ? setMarketConfig : undefined}
+            onConfigChange={setFocusConfig}
           />
         </div>
       </div>

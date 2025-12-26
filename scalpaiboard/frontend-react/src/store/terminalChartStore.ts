@@ -49,6 +49,10 @@ type TerminalChartState = {
 
   charts: Record<string, ChartConfig>
 
+  focusTimeframes: Record<string, Timeframe>
+  setFocusTimeframe: (marketId: string, tf: Timeframe) => void
+  getFocusTimeframe: (marketId: string) => Timeframe | null
+
   setLayout: (layout: GridLayout) => void
   setPage: (page: number) => void
   nextPage: () => void
@@ -81,6 +85,16 @@ export const useTerminalChartStore = create<TerminalChartState>()(
       focus: { open: false, kind: 'market', marketId: null, chartId: null },
 
       charts: {},
+
+      focusTimeframes: {},
+      setFocusTimeframe: (marketId, tf) => {
+        if (!marketId) return
+        set((s) => ({ focusTimeframes: { ...s.focusTimeframes, [marketId]: tf } }))
+      },
+      getFocusTimeframe: (marketId) => {
+        if (!marketId) return null
+        return get().focusTimeframes[marketId] || null
+      },
 
       setLayout: (layout) => {
         set({ layout })
@@ -220,11 +234,12 @@ export const useTerminalChartStore = create<TerminalChartState>()(
     }),
     {
       name: 'scalpaiboard-terminal-charts-v1',
-      version: 2,
+      version: 3,
       migrate: (persisted: any) => {
         return {
           ...persisted,
           focus: { open: false, kind: 'market', marketId: null, chartId: null },
+          focusTimeframes: persisted?.focusTimeframes || {},
         }
       },
       partialize: (state) => ({
@@ -234,6 +249,7 @@ export const useTerminalChartStore = create<TerminalChartState>()(
         selectedChartId: state.selectedChartId,
         charts: state.charts,
         focus: state.focus,
+        focusTimeframes: state.focusTimeframes,
       }),
     }
   )

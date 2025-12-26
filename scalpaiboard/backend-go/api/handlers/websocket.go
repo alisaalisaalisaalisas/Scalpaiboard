@@ -192,7 +192,7 @@ func (c *Client) writePump() {
 
 // startMarketDataStream broadcasts tickers for subscribed markets.
 func startMarketDataStream(hub *Hub) {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {

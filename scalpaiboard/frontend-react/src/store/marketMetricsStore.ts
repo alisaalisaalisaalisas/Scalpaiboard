@@ -26,7 +26,6 @@ export const useMarketMetricsStore = create<MarketMetricsState>((set, get) => ({
   get: (marketId) => {
     const entry = get().byMarketId[marketId]
     if (!entry) return null
-    if (Date.now() - entry.fetchedAt > MAX_AGE_MS) return null
     return entry.data
   },
 

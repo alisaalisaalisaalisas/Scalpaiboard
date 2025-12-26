@@ -4,6 +4,7 @@ import type { MarketItem } from '../../types'
 import { useMarketMetricsStore } from '../../store/marketMetricsStore'
 import { useTerminalChartStore } from '../../store/terminalChartStore'
 import { useTerminalMarketStore } from '../../store/terminalMarketStore'
+import { useTerminalTickerStore } from '../../store/terminalTickerStore'
 
 type ExchangeFilter = 'all' | 'BI' | 'BY' | 'OK'
 type TypeFilter = 'all' | 'spot' | 'perp'
@@ -41,6 +42,12 @@ export default function MarketSearchPanel() {
 
   const openFocusMarket = useTerminalChartStore((s) => s.openFocusMarket)
 
+  const connect = useTerminalTickerStore((s) => s.connect)
+  const connected = useTerminalTickerStore((s) => s.connected)
+  const subscribe = useTerminalTickerStore((s) => s.subscribe)
+  const unsubscribe = useTerminalTickerStore((s) => s.unsubscribe)
+  const tickers = useTerminalTickerStore((s) => s.tickers)
+
   const getMetric = useMarketMetricsStore((s) => s.get)
   const ensureMany = useMarketMetricsStore((s) => s.ensureMany)
 
@@ -75,9 +82,31 @@ export default function MarketSearchPanel() {
     return list.slice(0, 600)
   }, [exchange, markets, query, type])
 
+  const metricsPrefetchIds = useMemo(() => {
+    const prefetchCount = Math.max(40, Math.min(90, filtered.length))
+    return filtered.slice(0, prefetchCount).map((m) => m.marketId)
+  }, [filtered])
+
   useEffect(() => {
-    ensureMany(filtered.slice(0, 250).map((m) => m.marketId))
-  }, [ensureMany, filtered])
+    ensureMany(metricsPrefetchIds)
+    const t = window.setInterval(() => ensureMany(metricsPrefetchIds), 30_000)
+    return () => window.clearInterval(t)
+  }, [ensureMany, metricsPrefetchIds])
+
+  useEffect(() => {
+    if (metricsPrefetchIds.length === 0) return
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const url = `${wsProtocol}//${window.location.host}/ws`
+    if (!connected) connect(url)
+  }, [connect, connected, metricsPrefetchIds.length])
+
+  useEffect(() => {
+    if (!connected) return
+    if (metricsPrefetchIds.length === 0) return
+
+    subscribe(metricsPrefetchIds)
+    return () => unsubscribe(metricsPrefetchIds)
+  }, [connected, metricsPrefetchIds, subscribe, unsubscribe])
 
   const groups = useMemo(() => {
     const map = new Map<string, MarketItem[]>()
@@ -153,7 +182,8 @@ export default function MarketSearchPanel() {
                 <div className="divide-y divide-dark-800">
                   {list.slice(0, 120).map((m) => {
                     const met = getMetric(m.marketId)
-                    const ch = met?.changeTodayPct
+                    const t = tickers.get(m.marketId)
+                    const ch = typeof t?.change24h === 'number' ? t.change24h : met?.changeTodayPct
 
                     return (
                       <button

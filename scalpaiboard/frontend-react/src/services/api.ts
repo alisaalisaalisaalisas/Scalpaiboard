@@ -73,6 +73,12 @@ export const getCoin = async (symbol: string): Promise<Coin> => {
   return response.data
 }
 
+const normalizeCandleInterval = (interval: Timeframe | string) => {
+  if (interval === '1D') return '1d'
+  if (interval === '1W') return '1w'
+  return interval
+}
+
 export const getCandles = async (
   symbol: string,
   interval: Timeframe | string = '1h',
@@ -82,7 +88,7 @@ export const getCandles = async (
 ): Promise<Candle[]> => {
   const response = await client.get(`/api/coins/${symbol}/candles`, {
     params: {
-      interval,
+      interval: normalizeCandleInterval(interval),
       limit,
       ...(opts?.exchange ? { exchange: opts.exchange } : {}),
       ...(opts?.marketType ? { marketType: opts.marketType } : {}),
