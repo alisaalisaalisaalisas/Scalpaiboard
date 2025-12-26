@@ -790,14 +790,6 @@ export default function TerminalChartTile({ config, market, height, selected, on
     }
   }, [bollinger, candlesVersion, chartReady, ma, macd, rsi])
 
-  const timeToUnixSec = (v: any): number | null => {
-    if (typeof v === 'number') return Number(v)
-    if (v && typeof v === 'object' && typeof v.year === 'number' && typeof v.month === 'number' && typeof v.day === 'number') {
-      const ms = Date.UTC(v.year, v.month - 1, v.day)
-      return Math.floor(ms / 1000)
-    }
-    return null
-  }
 
   const getCoordFns = () => {
     const chart = chartRef.current
@@ -841,9 +833,8 @@ export default function TerminalChartTile({ config, market, height, selected, on
       const logical = logicalFromTime(t, candles)
       if (typeof logical !== 'number' || !Number.isFinite(logical)) return null
 
-      const x = timeScale.logicalToCoordinate?.(logical)
-      if (typeof x === 'number') return x
-
+      // Always use xFromVisibleRange for consistent mapping with toPoint.
+      // The logicalToCoordinate API is unreliable (returns 0 or wrong values).
       return xFromVisibleRange(logical)
     }
 
@@ -964,40 +955,27 @@ export default function TerminalChartTile({ config, market, height, selected, on
     const x = clientX - rect.left
     const y = clientY - rect.top
 
-    const timeScale: any = chart.timeScale()
-    const timeRaw = timeScale.coordinateToTime(x)
-    let time = timeToUnixSec(timeRaw)
-
-    // If coordinateToTime clamps to first/last bar, allow "future/past" mapping.
     const candles = candlesRef.current
-    if (candles.length > 0) {
-      const firstTime = candles[0]!.time
-      const lastIdx = candles.length - 1
-      const lastTime = candles[lastIdx]!.time
+    if (candles.length === 0) return null
 
-      const xFirst = timeScale.timeToCoordinate?.(firstTime as any)
-      const xLast = timeScale.timeToCoordinate?.(lastTime as any)
+    const timeScale: any = chart.timeScale()
+    const width = container.clientWidth
+    if (!Number.isFinite(width) || width <= 0) return null
 
-      if (typeof xFirst === 'number' && x < xFirst - 2) time = null
-      if (typeof xLast === 'number' && x > xLast + 2) time = null
-    }
+    // Use visible logical range for consistent X→time mapping.
+    // This mirrors how timeToX (via xFromVisibleRange) converts time→X.
+    const r = timeScale.getVisibleLogicalRange?.()
+    if (!r || typeof r.from !== 'number' || typeof r.to !== 'number') return null
+    if (!Number.isFinite(r.from) || !Number.isFinite(r.to) || r.to === r.from) return null
 
-    // Support drawing/dragging into "future" space (right of last bar).
-    if (time == null) {
-      if (candles.length > 0) {
-        const r = timeScale.getVisibleLogicalRange?.()
-        if (r && typeof r.from === 'number' && typeof r.to === 'number' && r.to !== r.from) {
-          const width = container.clientWidth
-          if (Number.isFinite(width) && width > 0) {
-            const from = Math.min(r.from, r.to)
-            const to = Math.max(r.from, r.to)
-            const xClamped = Math.min(width, Math.max(0, x))
-            const logical = from + (xClamped / width) * (to - from)
-            time = timeFromLogical(logical, candles)
-          }
-        }
-      }
-    }
+    // Normalize range to ensure from < to (handle potential reversed ranges)
+    const from = Math.min(r.from, r.to)
+    const to = Math.max(r.from, r.to)
+    if (to === from) return null
+
+    // Convert X to logical index (inverse of xFromVisibleRange formula)
+    const logical = from + (x / width) * (to - from)
+    const time = timeFromLogical(logical, candles)
 
     const price = series.coordinateToPrice(y)
     if (time == null || price == null) return null
