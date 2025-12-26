@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getAIProviders, addAIProvider, testAIProvider, deleteAIProvider, fetchProviderModelsDetailed, updateAIProvider, getProviderModelsByIdDetailed, type AIProviderModelDetail } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
+import { useRightPanelStore } from '../../store/rightPanelStore';
 import { Pencil, Trash2, RefreshCw, Info } from 'lucide-react';
 
 interface Provider {
@@ -42,6 +43,7 @@ const AVAILABLE_PROVIDERS: AvailableProvider[] = [
 export const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const openChat = useRightPanelStore((state) => state.openChat);
 
   const { isAuthenticated } = useAuthStore();
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -519,9 +521,9 @@ export const SettingsPage: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={() => openChat()}
             className="text-xs px-3 py-2 bg-gray-700 text-gray-200 rounded-lg hover:bg-gray-600 transition-colors"
-            title="Go to dashboard"
+            title="Open AI chat"
           >
             Open Chat
           </button>

@@ -314,7 +314,7 @@ export default function ChatInterface({ onClose }: ChatInterfaceProps) {
         }
       }
 
-      const response = await fetch('http://localhost:3001/api/ai/chat', {
+      const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -377,7 +377,7 @@ export default function ChatInterface({ onClose }: ChatInterfaceProps) {
                 </button>
 
                 {isSessionMenuOpen && (
-                  <div className="absolute left-0 mt-2 w-72 bg-dark-800 border border-dark-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-16px)] bg-dark-800 border border-dark-700 rounded-xl shadow-xl z-50 overflow-hidden">
                     <div className="px-3 py-2 border-b border-dark-700 flex items-center justify-between">
                       <div className="text-xs text-dark-400">Sessions</div>
                       <button

@@ -1,7 +1,8 @@
 import axios from 'axios'
-import { Coin, Candle, Alert, WatchlistItem, AIProvider, PaginatedResponse, Orderbook } from '../types'
+import { Coin, Candle, Alert, WatchlistItem, AIProvider, PaginatedResponse, Orderbook, CoinAnalysis, MarketItem, MarketMetrics, Timeframe } from '../types'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+
+const API_URL = import.meta.env.VITE_API_URL || ''
 
 const client = axios.create({
   baseURL: API_URL,
@@ -35,7 +36,30 @@ client.interceptors.request.use((config) => {
 })
 
 
+// ========== Markets (terminal) ==========
+
+export const getMarkets = async (params?: {
+  query?: string
+  exchange?: string
+  type?: string
+}): Promise<MarketItem[]> => {
+  const response = await client.get('/api/markets', {
+    params: {
+      ...(params?.query ? { query: params.query } : {}),
+      ...(params?.exchange ? { exchange: params.exchange } : {}),
+      ...(params?.type ? { type: params.type } : {}),
+    },
+  })
+  return response.data.data
+}
+
+export const getMarketMetrics = async (marketId: string): Promise<MarketMetrics> => {
+  const response = await client.get(`/api/markets/${encodeURIComponent(marketId)}/metrics`)
+  return response.data
+}
+
 // ========== Coins ==========
+
 
 export const getCoins = async (page = 1, limit = 50, sortBy = 'volume24h', sortOrder = 'desc'): Promise<PaginatedResponse<Coin>> => {
   const response = await client.get('/api/coins', {
@@ -51,19 +75,23 @@ export const getCoin = async (symbol: string): Promise<Coin> => {
 
 export const getCandles = async (
   symbol: string,
-  interval = '1h',
+  interval: Timeframe | string = '1h',
   limit = 100,
-  endTime?: number
+  endTime?: number,
+  opts?: { exchange?: string; marketType?: 'spot' | 'perp' | 'perpetual' | 'futures' }
 ): Promise<Candle[]> => {
   const response = await client.get(`/api/coins/${symbol}/candles`, {
     params: {
       interval,
       limit,
+      ...(opts?.exchange ? { exchange: opts.exchange } : {}),
+      ...(opts?.marketType ? { marketType: opts.marketType } : {}),
       ...(typeof endTime === 'number' ? { endTime } : {}),
     }
   })
   return response.data.candles
 }
+
 
 
 export const getOrderbook = async (symbol: string, limit = 20): Promise<Orderbook> => {
@@ -72,6 +100,19 @@ export const getOrderbook = async (symbol: string, limit = 20): Promise<Orderboo
   })
   return response.data
 }
+
+export const getCoinAnalysis = async (
+  symbol: string,
+  interval = '1h',
+  limit = 250,
+  exchange?: string
+): Promise<CoinAnalysis> => {
+  const response = await client.get(`/api/coins/${symbol}/analysis`, {
+    params: { interval, limit, ...(exchange ? { exchange } : {}) }
+  })
+  return response.data
+}
+
 
 // ========== Watchlist ==========
 
@@ -210,7 +251,7 @@ export const fetchProviderModelsDetailed = async (
 
 
 export const sendAIMessage = async (message: string, providerId?: number, conversationId?: string): Promise<ReadableStream> => {
-  const response = await fetch(`${API_URL}/api/ai/chat`, {
+  const response = await fetch(`/api/ai/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,15 +129,36 @@ func (c *Client) readPump() {
 		var msg struct {
 			Type    string   `json:"type"`
 			Symbols []string `json:"symbols"`
+			Markets []string `json:"markets"`
 		}
 		if err := json.Unmarshal(message, &msg); err == nil {
+			items := msg.Markets
+			if len(items) == 0 {
+				items = msg.Symbols
+			}
+
 			if msg.Type == "subscribe" {
-				for _, symbol := range msg.Symbols {
-					c.subscriptions[symbol] = true
+				for _, item := range items {
+					key := strings.TrimSpace(item)
+					if key == "" {
+						continue
+					}
+					// Backwards compatible: if client sends a plain symbol, assume BI:SPOT.
+					if !strings.Contains(key, ":") {
+						key = "BI:SPOT:" + strings.ToUpper(key)
+					}
+					c.subscriptions[key] = true
 				}
 			} else if msg.Type == "unsubscribe" {
-				for _, symbol := range msg.Symbols {
-					delete(c.subscriptions, symbol)
+				for _, item := range items {
+					key := strings.TrimSpace(item)
+					if key == "" {
+						continue
+					}
+					if !strings.Contains(key, ":") {
+						key = "BI:SPOT:" + strings.ToUpper(key)
+					}
+					delete(c.subscriptions, key)
 				}
 			}
 		}
@@ -168,54 +190,52 @@ func (c *Client) writePump() {
 	}
 }
 
-// startMarketDataStream fetches market data and broadcasts to clients
+// startMarketDataStream broadcasts tickers for subscribed markets.
 func startMarketDataStream(hub *Hub) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	symbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT", "XRPUSDT",
-		"DOGEUSDT", "AVAXUSDT", "DOTUSDT", "LINKUSDT", "MATICUSDT", "ARBUSDT"}
-
 	for range ticker.C {
-		for _, symbol := range symbols {
-			data := fetchPriceUpdate(symbol)
-			if data != nil {
-				message, _ := json.Marshal(data)
-				hub.broadcast <- message
+		// Build a unique set of marketIds subscribed by any client.
+		hub.mu.RLock()
+		subs := make(map[string]bool)
+		for client := range hub.clients {
+			for marketID := range client.subscriptions {
+				subs[marketID] = true
 			}
 		}
-	}
-}
+		hub.mu.RUnlock()
 
-func fetchPriceUpdate(symbol string) map[string]interface{} {
-	resp, err := http.Get("https://api.binance.com/api/v3/ticker/24hr?symbol=" + symbol)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
+		if len(subs) == 0 {
+			continue
+		}
 
-	var ticker struct {
-		Symbol             string `json:"symbol"`
-		LastPrice          string `json:"lastPrice"`
-		PriceChange        string `json:"priceChange"`
-		PriceChangePercent string `json:"priceChangePercent"`
-		Volume             string `json:"volume"`
-		HighPrice          string `json:"highPrice"`
-		LowPrice           string `json:"lowPrice"`
-	}
+		for marketID := range subs {
+			exchange, marketType, symbol, ok := parseMarketID(marketID)
+			if !ok {
+				continue
+			}
 
-	if err := json.NewDecoder(resp.Body).Decode(&ticker); err != nil {
-		return nil
-	}
+			price, changePct, volume24h, err := fetchTicker(exchange, marketType, symbol)
+			if err != nil {
+				continue
+			}
 
-	return map[string]interface{}{
-		"type":      "ticker",
-		"symbol":    ticker.Symbol,
-		"price":     ticker.LastPrice,
-		"change24h": ticker.PriceChangePercent,
-		"volume24h": ticker.Volume,
-		"high24h":   ticker.HighPrice,
-		"low24h":    ticker.LowPrice,
-		"timestamp": time.Now().Unix(),
+			msg := map[string]interface{}{
+				"type":       "ticker",
+				"marketId":   marketID,
+				"symbol":     symbol,
+				"exchange":   exchange,
+				"marketType": marketType,
+				"price":      price,
+				"change24h":  changePct,
+				"volume24h":  volume24h,
+				"timestamp":  time.Now().Unix(),
+			}
+
+			if payload, err := json.Marshal(msg); err == nil {
+				hub.broadcast <- payload
+			}
+		}
 	}
 }

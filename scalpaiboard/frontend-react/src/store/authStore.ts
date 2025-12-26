@@ -52,7 +52,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (error: any) {
           set({
             isLoading: false,
-            error: error.response?.data?.error || 'Login failed',
+            error: error.response?.data?.error || error.message || 'Login failed',
           });
           return false;
         }
@@ -77,7 +77,7 @@ export const useAuthStore = create<AuthState>()(
         } catch (error: any) {
           set({
             isLoading: false,
-            error: error.response?.data?.error || 'Registration failed',
+            error: error.response?.data?.error || error.message || 'Registration failed',
           });
           return false;
         }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -89,6 +91,7 @@ func (h *CoinHandler) GetCandles(c *gin.Context) {
 	interval := c.DefaultQuery("interval", "1h")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	exchange := c.DefaultQuery("exchange", "binance")
+	marketType := strings.ToLower(c.DefaultQuery("marketType", "spot"))
 
 	endTimeSec, _ := strconv.ParseInt(c.DefaultQuery("endTime", "0"), 10, 64)
 
@@ -101,9 +104,17 @@ func (h *CoinHandler) GetCandles(c *gin.Context) {
 
 	switch exchange {
 	case "binance":
-		candles, err = fetchBinanceCandles(symbol, interval, limit, endTimeSec)
+		if marketType == "perp" || marketType == "perpetual" || marketType == "futures" {
+			candles, err = fetchBinanceFuturesCandles(symbol, interval, limit, endTimeSec)
+		} else {
+			candles, err = fetchBinanceCandles(symbol, interval, limit, endTimeSec)
+		}
 	case "bybit":
-		candles, err = fetchBybitCandles(symbol, interval, limit, endTimeSec)
+		if marketType == "perp" || marketType == "perpetual" || marketType == "futures" {
+			candles, err = fetchBybitLinearCandles(symbol, interval, limit, endTimeSec)
+		} else {
+			candles, err = fetchBybitCandles(symbol, interval, limit, endTimeSec)
+		}
 	default:
 		candles, err = fetchBinanceCandles(symbol, interval, limit, endTimeSec)
 	}
@@ -113,10 +124,41 @@ func (h *CoinHandler) GetCandles(c *gin.Context) {
 		return
 	}
 
+	// Normalize candles order and filter invalid entries.
+	normalized := make([]map[string]interface{}, 0, len(candles))
+	for _, candle := range candles {
+		if candle == nil {
+			continue
+		}
+		rawTime, ok := candle["time"]
+		if !ok {
+			continue
+		}
+		var t int64
+		switch v := rawTime.(type) {
+		case int64:
+			t = v
+		case int:
+			t = int64(v)
+		case float64:
+			t = int64(v)
+		default:
+			continue
+		}
+		candle["time"] = t
+		normalized = append(normalized, candle)
+	}
+
+	sort.Slice(normalized, func(i, j int) bool {
+		ti, _ := normalized[i]["time"].(int64)
+		tj, _ := normalized[j]["time"].(int64)
+		return ti < tj
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"symbol":   symbol,
 		"interval": interval,
-		"candles":  candles,
+		"candles":  normalized,
 	})
 }
 
@@ -191,6 +233,44 @@ func fetchBinanceCandles(symbol, interval string, limit int, endTimeSec int64) (
 	return candles, nil
 }
 
+func fetchBinanceFuturesCandles(symbol, interval string, limit int, endTimeSec int64) ([]map[string]interface{}, error) {
+	url := fmt.Sprintf("https://fapi.binance.com/fapi/v1/klines?symbol=%s&interval=%s&limit=%d",
+		symbol, interval, limit)
+	if endTimeSec > 0 {
+		url += fmt.Sprintf("&endTime=%d", endTimeSec*1000)
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var rawCandles [][]interface{}
+	if err := json.Unmarshal(body, &rawCandles); err != nil {
+		return nil, err
+	}
+
+	candles := make([]map[string]interface{}, len(rawCandles))
+	for i, raw := range rawCandles {
+		candles[i] = map[string]interface{}{
+			"time":   int64(raw[0].(float64)) / 1000,
+			"open":   parseFloat(raw[1]),
+			"high":   parseFloat(raw[2]),
+			"low":    parseFloat(raw[3]),
+			"close":  parseFloat(raw[4]),
+			"volume": parseFloat(raw[5]),
+		}
+	}
+
+	return candles, nil
+}
+
 func fetchBinanceOrderbook(symbol string, limit int) (map[string]interface{}, error) {
 	url := fmt.Sprintf("https://api.binance.com/api/v3/depth?symbol=%s&limit=%d", symbol, limit)
 
@@ -248,6 +328,53 @@ func fetchBybitCandles(symbol, interval string, limit int, endTimeSec int64) ([]
 	}
 
 	// Transform to structured format
+	candles := make([]map[string]interface{}, len(result.Result.List))
+	for i, raw := range result.Result.List {
+		if len(raw) >= 6 {
+			timestamp, _ := strconv.ParseInt(raw[0], 10, 64)
+			candles[i] = map[string]interface{}{
+				"time":   timestamp / 1000,
+				"open":   parseFloatString(raw[1]),
+				"high":   parseFloatString(raw[2]),
+				"low":    parseFloatString(raw[3]),
+				"close":  parseFloatString(raw[4]),
+				"volume": parseFloatString(raw[5]),
+			}
+		}
+	}
+
+	return candles, nil
+}
+
+func fetchBybitLinearCandles(symbol, interval string, limit int, endTimeSec int64) ([]map[string]interface{}, error) {
+	bybitInterval := convertToBybitInterval(interval)
+
+	url := fmt.Sprintf("https://api.bybit.com/v5/market/kline?category=linear&symbol=%s&interval=%s&limit=%d",
+		symbol, bybitInterval, limit)
+	if endTimeSec > 0 {
+		url += fmt.Sprintf("&end=%d", endTimeSec*1000)
+	}
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Result struct {
+			List [][]string `json:"list"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
 	candles := make([]map[string]interface{}, len(result.Result.List))
 	for i, raw := range result.Result.List {
 		if len(raw) >= 6 {

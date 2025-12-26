@@ -1,21 +1,21 @@
 import { Link, useLocation } from 'react-router-dom'
 import { 
   LayoutDashboard, 
-  LineChart, 
   Bell, 
   Star, 
   Settings,
   Zap
 } from 'lucide-react'
+
 import clsx from 'clsx'
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/screener', icon: LineChart, label: 'Screener' },
   { path: '/alerts', icon: Bell, label: 'Alerts' },
   { path: '/watchlist', icon: Star, label: 'Watchlist' },
   { path: '/settings', icon: Settings, label: 'Settings' },
 ]
+
 
 export default function Sidebar() {
   const location = useLocation()

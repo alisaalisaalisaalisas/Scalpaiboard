@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,7 @@ func main() {
 
 	// Initialize handlers
 	coinHandler := handlers.NewCoinHandler(coinService, exchangeService)
+	marketHandler := handlers.NewMarketHandler(coinService)
 	alertHandler := handlers.NewAlertHandler(alertService)
 	watchlistHandler := handlers.NewWatchlistHandler(watchlistService)
 	wsHandler := handlers.NewWebSocketHandler(exchangeService)
@@ -57,10 +59,20 @@ func main() {
 	// CORS configuration
 	corsOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
 	if corsOrigins == "" {
-		corsOrigins = "http://localhost:3000,http://localhost:5173"
+		corsOrigins = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173"
 	}
+
+	origins := make([]string, 0, 8)
+	for _, origin := range strings.Split(corsOrigins, ",") {
+		o := strings.TrimSpace(origin)
+		if o == "" {
+			continue
+		}
+		origins = append(origins, o)
+	}
+
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:5173"},
+		AllowOrigins:     origins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -79,10 +91,15 @@ func main() {
 	router.POST("/api/auth/login", authHandler.Login)
 
 	// Public routes
+	router.GET("/api/markets", marketHandler.ListMarkets)
+	router.GET("/api/markets/:marketId/metrics", marketHandler.GetMetrics)
 	router.GET("/api/coins", coinHandler.ListCoins)
 	router.GET("/api/coins/:symbol", coinHandler.GetCoin)
 	router.GET("/api/coins/:symbol/candles", coinHandler.GetCandles)
 	router.GET("/api/coins/:symbol/orderbook", coinHandler.GetOrderbook)
+
+	analysisHandler := handlers.NewAnalysisHandler()
+	router.GET("/api/coins/:symbol/analysis", analysisHandler.GetAnalysis)
 
 	// WebSocket
 	router.GET("/ws", wsHandler.HandleConnection)

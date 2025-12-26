@@ -5,7 +5,10 @@ interface WebSocketState {
   socket: WebSocket | null
   connected: boolean
   prices: Map<string, TickerUpdate>
-  
+
+  reconnectEnabled: boolean
+  lastUrl: string | null
+
   connect: (url: string) => void
   disconnect: () => void
   subscribe: (symbols: string[]) => void
@@ -18,7 +21,16 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
   connected: false,
   prices: new Map(),
 
+  reconnectEnabled: false,
+  lastUrl: null,
+
   connect: (url: string) => {
+    const existing = get().socket
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+
+    set({ reconnectEnabled: true, lastUrl: url })
     const socket = new WebSocket(url)
 
     socket.onopen = () => {
@@ -54,11 +66,15 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
       set({ socket: null, connected: false })
       
       // Attempt reconnection after 3 seconds
-      setTimeout(() => {
-        if (!get().connected) {
-          get().connect(url)
-        }
-      }, 3000)
+      if (get().reconnectEnabled) {
+        setTimeout(() => {
+          const nextUrl = get().lastUrl
+          if (!get().reconnectEnabled || !nextUrl) return
+          if (!get().connected) {
+            get().connect(nextUrl)
+          }
+        }, 3000)
+      }
     }
 
     socket.onerror = (error) => {
@@ -68,6 +84,7 @@ export const useWebSocketStore = create<WebSocketState>((set, get) => ({
 
   disconnect: () => {
     const { socket } = get()
+    set({ reconnectEnabled: false, lastUrl: null })
     if (socket) {
       socket.close()
       set({ socket: null, connected: false })
