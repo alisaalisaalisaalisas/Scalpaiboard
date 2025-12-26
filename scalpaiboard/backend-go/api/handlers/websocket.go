@@ -62,6 +62,13 @@ func NewWebSocketHandler(exchangeService *service.ExchangeService) *WebSocketHan
 	}
 }
 
+func safeCloseSend(ch chan []byte) {
+	defer func() {
+		_ = recover()
+	}()
+	close(ch)
+}
+
 func (h *Hub) run() {
 	for {
 		select {
@@ -75,22 +82,35 @@ func (h *Hub) run() {
 			h.mu.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				close(client.send)
+				safeCloseSend(client.send)
 			}
 			h.mu.Unlock()
 			log.Printf("Client disconnected. Total: %d", len(h.clients))
 
 		case message := <-h.broadcast:
+			// Note: never delete from the map while iterating under RLock.
+			toDrop := make([]*Client, 0)
+
 			h.mu.RLock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
 				default:
-					close(client.send)
-					delete(h.clients, client)
+					toDrop = append(toDrop, client)
 				}
 			}
 			h.mu.RUnlock()
+
+			if len(toDrop) > 0 {
+				h.mu.Lock()
+				for _, client := range toDrop {
+					if _, ok := h.clients[client]; ok {
+						delete(h.clients, client)
+						safeCloseSend(client.send)
+					}
+				}
+				h.mu.Unlock()
+			}
 		}
 	}
 }
@@ -275,9 +295,13 @@ func startMarketDataStream(hub *Hub) {
 
 		wg.Wait()
 
-		// Deliver only to clients that subscribed.
+		// Deliver only to clients that are still connected and subscribed.
 		hub.mu.RLock()
 		for _, client := range clients {
+			if _, ok := hub.clients[client]; !ok {
+				continue
+			}
+
 			client.subMu.RLock()
 			for marketID := range client.subscriptions {
 				payload := payloadByMarket[marketID]

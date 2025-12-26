@@ -41,12 +41,6 @@ export default function MainDashboard() {
             <span className="text-dark-300">{connected ? 'Live' : 'Offline'}</span>
           </div>
 
-          <div className="hidden md:flex items-center gap-2 text-xs text-dark-400">
-            <span>Type to search</span>
-            <span className="px-2 py-0.5 bg-dark-700 rounded">Ctrl+K</span>
-            <span className="px-2 py-0.5 bg-dark-700 rounded">Shift+S</span>
-            <span className="px-2 py-0.5 bg-dark-700 rounded">Shift+D</span>
-          </div>
         </div>
 
         <div className="flex items-center gap-3">

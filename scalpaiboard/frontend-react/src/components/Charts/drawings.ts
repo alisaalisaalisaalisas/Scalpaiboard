@@ -29,7 +29,29 @@ export const hitTestDrawing = (drawings: Drawing[], mouseX: number, mouseY: numb
       if (!p) continue
       const y = fns.priceToY(p.price)
       if (y == null) continue
-      if (Math.abs(mouseY - y) <= thresholdPx) return d
+      const x0 = fns.timeToX(p.time) ?? 0
+      if (distToSegment(mouseX, mouseY, x0, y, 1e9, y) <= thresholdPx) return d
+    }
+
+    if (d.type === 'line') {
+      const a = d.points[0]
+      const b = d.points[1]
+      if (!a || !b) continue
+      const ax = fns.timeToX(a.time)
+      const ay = fns.priceToY(a.price)
+      const bx = fns.timeToX(b.time)
+      const by = fns.priceToY(b.price)
+      if (ax == null || ay == null || bx == null || by == null) continue
+
+      // Infinite line distance via segment approximation on screen.
+      const dx = bx - ax
+      const dy = by - ay
+      const len2 = dx * dx + dy * dy
+      if (len2 === 0) continue
+      const t = ((mouseX - ax) * dx + (mouseY - ay) * dy) / len2
+      const cx = ax + t * dx
+      const cy = ay + t * dy
+      if (Math.hypot(mouseX - cx, mouseY - cy) <= thresholdPx) return d
     }
 
     if (d.type === 'trendline') {
@@ -71,11 +93,15 @@ export const drawAll = (
   ctx: CanvasRenderingContext2D,
   drawings: Drawing[],
   fns: CoordFns,
-  preview?: { type: Drawing['type']; points: DrawingPoint[] } | null
+  preview?: { type: Drawing['type']; points: DrawingPoint[]; label?: string } | null
 ) => {
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  const canvasW = ctx.canvas.width / dpr
+  const canvasH = ctx.canvas.height / dpr
 
-  const drawOne = (d: { type: Drawing['type']; points: DrawingPoint[] }, alpha = 1) => {
+  ctx.clearRect(0, 0, canvasW, canvasH)
+
+  const drawOne = (d: { type: Drawing['type']; points: DrawingPoint[]; label?: string }, alpha = 1) => {
     ctx.save()
     ctx.globalAlpha = alpha
     ctx.lineWidth = 2
@@ -87,10 +113,41 @@ export const drawAll = (
       if (!p) return
       const y = fns.priceToY(p.price)
       if (y == null) return
+      const x0 = fns.timeToX(p.time) ?? 0
       ctx.setLineDash([6, 6])
       ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(ctx.canvas.width, y)
+      ctx.moveTo(x0, y)
+      ctx.lineTo(canvasW, y)
+      ctx.stroke()
+      return
+    }
+
+    if (d.type === 'line') {
+      const a = d.points[0]
+      const b = d.points[1]
+      if (!a || !b) return
+      const ax = fns.timeToX(a.time)
+      const ay = fns.priceToY(a.price)
+      const bx = fns.timeToX(b.time)
+      const by = fns.priceToY(b.price)
+      if (ax == null || ay == null || bx == null || by == null) return
+
+      ctx.setLineDash([])
+
+      // Extend line to the screen bounds.
+      const dx = bx - ax
+      const dy = by - ay
+      if (dx === 0 && dy === 0) return
+
+      const xLeft = 0
+      const xRight = canvasW
+
+      const yLeft = dx === 0 ? ay : ay + ((xLeft - ax) * dy) / dx
+      const yRight = dx === 0 ? by : ay + ((xRight - ax) * dy) / dx
+
+      ctx.beginPath()
+      ctx.moveTo(xLeft, yLeft)
+      ctx.lineTo(xRight, yRight)
       ctx.stroke()
       return
     }
@@ -130,6 +187,51 @@ export const drawAll = (
       ctx.setLineDash([])
       ctx.fillRect(left, top, right - left, bottom - top)
       ctx.strokeRect(left, top, right - left, bottom - top)
+
+      if (d.label) {
+        const lines = String(d.label).split('\n')
+        ctx.setLineDash([])
+        ctx.font = '12px ui-sans-serif, system-ui, -apple-system, Segoe UI'
+        const padX = 8
+        const padY = 6
+        const lineH = 16
+        const textW = Math.max(...lines.map((l) => ctx.measureText(l).width))
+        const boxW = textW + padX * 2
+        const boxH = lines.length * lineH + padY * 2
+
+        const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+        const bx0 = clamp(right + 10, 6, canvasW - boxW - 6)
+        const by0 = clamp(top + 6, 6, canvasH - boxH - 6)
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
+        ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)'
+        ctx.lineWidth = 1
+        const rr = (x: number, y: number, w2: number, h2: number, r: number) => {
+          const r2 = Math.min(r, w2 / 2, h2 / 2)
+          ctx.beginPath()
+          ctx.moveTo(x + r2, y)
+          ctx.lineTo(x + w2 - r2, y)
+          ctx.arcTo(x + w2, y, x + w2, y + r2, r2)
+          ctx.lineTo(x + w2, y + h2 - r2)
+          ctx.arcTo(x + w2, y + h2, x + w2 - r2, y + h2, r2)
+          ctx.lineTo(x + r2, y + h2)
+          ctx.arcTo(x, y + h2, x, y + h2 - r2, r2)
+          ctx.lineTo(x, y + r2)
+          ctx.arcTo(x, y, x + r2, y, r2)
+          ctx.closePath()
+        }
+
+        rr(bx0, by0, boxW, boxH, 6)
+        ctx.fill()
+        ctx.stroke()
+
+        ctx.fillStyle = 'rgba(226, 232, 240, 0.95)'
+        for (let i = 0; i < lines.length; i += 1) {
+          ctx.fillText(lines[i]!, bx0 + padX, by0 + padY + (i + 1) * lineH - 4)
+        }
+      }
+
       return
     }
   }

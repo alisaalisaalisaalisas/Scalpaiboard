@@ -69,7 +69,7 @@ export default function KeyboardSearchOverlay() {
           return
         }
 
-        if (!e.ctrlKey && !e.metaKey && !e.altKey && isSearchChar(e.key)) {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && isSearchChar(e.key)) {
           setOpen(true)
           setQuery(e.key)
           setIdx(0)
@@ -125,7 +125,7 @@ export default function KeyboardSearchOverlay() {
         return
       }
 
-      if (!e.ctrlKey && !e.metaKey && !e.altKey && isSearchChar(e.key)) {
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && isSearchChar(e.key)) {
         setQuery((q) => q + e.key)
       }
     }

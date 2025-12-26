@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from 'react'
 import { createChart, IChartApi, ISeriesApi, LineStyle } from 'lightweight-charts'
 import { Star } from 'lucide-react'
 
@@ -133,6 +133,8 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
   const drawings = useDrawingsStore((s) => s.getDrawings(config.drawingStateId))
   const addDrawing = useDrawingsStore((s) => s.addDrawing)
+  const upsertDrawing = useDrawingsStore((s) => s.upsertDrawing)
+  const setDrawings = useDrawingsStore((s) => s.setDrawings)
   const removeDrawing = useDrawingsStore((s) => s.removeDrawing)
 
   const ticker = useTerminalTickerStore((s) => s.getTicker(config.marketId))
@@ -148,7 +150,28 @@ export default function TerminalChartTile({ config, market, height, selected, on
   const [hovered, setHovered] = useState(false)
   const [tool, setTool] = useState<DrawingTool>('none')
   const [pendingPoint, setPendingPoint] = useState<{ time: number; price: number } | null>(null)
-  const [preview, setPreview] = useState<{ type: 'trendline' | 'ray' | 'rect'; points: { time: number; price: number }[] } | null>(null)
+  const [preview, setPreview] = useState<{ type: 'line' | 'trendline' | 'ray' | 'rect'; points: { time: number; price: number }[]; label?: string } | null>(null)
+
+  const measureActiveRef = useRef(false)
+
+  useEffect(() => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift') return
+      if (measureActiveRef.current) {
+        measureActiveRef.current = false
+        setPendingPoint(null)
+        setPreview(null)
+      }
+    }
+    window.addEventListener('keyup', onKeyUp)
+    return () => window.removeEventListener('keyup', onKeyUp)
+  }, [])
+
+  useEffect(() => {
+    // Clear in-progress drawing when switching tools.
+    setPendingPoint(null)
+    setPreview(null)
+  }, [tool])
 
   const [alertModalOpen, setAlertModalOpen] = useState(false)
   const [alertDefaultPrice, setAlertDefaultPrice] = useState<number | undefined>(undefined)
@@ -204,7 +227,7 @@ export default function TerminalChartTile({ config, market, height, selected, on
       width: Math.max(1, container.clientWidth),
       height,
       rightPriceScale: { borderColor: '#1f2a3a' },
-      timeScale: { borderColor: '#1f2a3a', timeVisible: true, secondsVisible: false },
+      timeScale: { borderColor: '#1f2a3a', timeVisible: true, secondsVisible: false, rightOffset: 40 },
       crosshair: { mode: 0 },
       watermark: {
         visible: true,
@@ -767,43 +790,113 @@ export default function TerminalChartTile({ config, market, height, selected, on
     }
   }, [bollinger, candlesVersion, chartReady, ma, macd, rsi])
 
+  const timeToUnixSec = (v: any): number | null => {
+    if (typeof v === 'number') return Number(v)
+    if (v && typeof v === 'object' && typeof v.year === 'number' && typeof v.month === 'number' && typeof v.day === 'number') {
+      const ms = Date.UTC(v.year, v.month - 1, v.day)
+      return Math.floor(ms / 1000)
+    }
+    return null
+  }
+
+  const getCoordFns = () => {
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    const container = containerRef.current
+    if (!chart || !series || !container) return null
+
+    const timeScale: any = chart.timeScale()
+
+    const xFromVisibleRange = (logical: number) => {
+      const r = timeScale.getVisibleLogicalRange?.()
+      if (!r || typeof r.from !== 'number' || typeof r.to !== 'number') return null
+      if (!Number.isFinite(r.from) || !Number.isFinite(r.to) || r.to === r.from) return null
+
+      const from = Math.min(r.from, r.to)
+      const to = Math.max(r.from, r.to)
+      if (to === from) return null
+
+      const width = container.clientWidth
+      if (!Number.isFinite(width) || width <= 0) return null
+
+      return ((logical - from) / (to - from)) * width
+    }
+
+    const logicalFromTime = (t: number, candles: { time: number }[]) => {
+      if (candles.length === 0) return null
+
+      const lastIdx = candles.length - 1
+      const firstTime = candles[0]!.time
+      const lastTime = candles[lastIdx]!.time
+
+      if (t <= firstTime) return (t - firstTime) / intervalSeconds
+      if (t >= lastTime) return lastIdx + (t - lastTime) / intervalSeconds
+
+      return findNearestIndexByTime(t, candles)
+    }
+
+    const timeToX = (t: number) => {
+      // Use logical mapping for stability across zoom/pan.
+      const candles = candlesRef.current
+      const logical = logicalFromTime(t, candles)
+      if (typeof logical !== 'number' || !Number.isFinite(logical)) return null
+
+      const x = timeScale.logicalToCoordinate?.(logical)
+      if (typeof x === 'number') return x
+
+      return xFromVisibleRange(logical)
+    }
+
+    return {
+      timeToX,
+      priceToY: (p: number) => {
+        const v = series.priceToCoordinate(p)
+        return typeof v === 'number' ? v : null
+      },
+    }
+  }
+
   // Drawing overlay rendering.
   useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
     const chart = chartRef.current
-    const series = candleSeriesRef.current
-    if (!canvas || !container || !chart || !series) return
+    if (!canvas || !container || !chart) return
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    let lastW = 0
+    let lastH = 0
+    let lastDpr = 0
+
     const resize = () => {
       const rect = container.getBoundingClientRect()
       const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.floor(rect.width * dpr)
-      canvas.height = Math.floor(rect.height * dpr)
+      const nextW = Math.floor(rect.width * dpr)
+      const nextH = Math.floor(rect.height * dpr)
+      if (nextW === lastW && nextH === lastH && dpr === lastDpr) return
+
+      lastW = nextW
+      lastH = nextH
+      lastDpr = dpr
+
+      canvas.width = nextW
+      canvas.height = nextH
       canvas.style.width = `${rect.width}px`
       canvas.style.height = `${rect.height}px`
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
 
-    const fns = {
-      timeToX: (t: number) => {
-        const x = chart.timeScale().timeToCoordinate(t as any)
-        return typeof x === 'number' ? x : null
-      },
-      priceToY: (p: number) => {
-        const y = series.priceToCoordinate(p)
-        return typeof y === 'number' ? y : null
-      },
-    }
-
     const render = () => {
+      const fns = getCoordFns()
+      if (!fns) return
+
       resize()
       drawAll(ctx, drawings, fns, preview)
     }
 
+    overlayRenderRef.current = render
     render()
 
     const timeScale: any = chart.timeScale()
@@ -811,153 +904,352 @@ export default function TerminalChartTile({ config, market, height, selected, on
     timeScale?.subscribeVisibleTimeRangeChange?.(onRange)
 
     return () => {
+      overlayRenderRef.current = null
       timeScale?.unsubscribeVisibleTimeRangeChange?.(onRange)
     }
   }, [drawings, preview])
 
-  // Drawing interactions.
-  useEffect(() => {
-    const canvas = canvasRef.current
-    const chart = chartRef.current
-    const series = candleSeriesRef.current
-    if (!canvas || !chart || !series) return
+  const HIT_THRESHOLD_PX = 8
 
-    const toPoint = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect()
-      const x = clientX - rect.left
-      const y = clientY - rect.top
+  const dragStateRef = useRef<{
+    id: string
+    type: 'line' | 'trendline' | 'ray' | 'rect'
+    createdAt: number
+    start: { time: number; price: number }
+    orig: { time: number; price: number }[]
+  } | null>(null)
 
-      const timeRaw = chart.timeScale().coordinateToTime(x)
-      const time = typeof timeRaw === 'number' ? timeRaw : null
-      const price = series.coordinateToPrice(y)
-      if (time == null || price == null) return null
-      return { time: Number(time), price: Number(price), x, y }
+  const dragRafRef = useRef<number | null>(null)
+  const dragLatestRef = useRef<{ time: number; price: number } | null>(null)
+  const rectDragRef = useRef(false)
+
+  const overlayRenderRef = useRef<(() => void) | null>(null)
+
+  const findNearestIndexByTime = (t: number, candles: { time: number }[]) => {
+    let lo = 0
+    let hi = candles.length - 1
+
+    while (lo + 1 < hi) {
+      const mid = (lo + hi) >> 1
+      if (candles[mid]!.time <= t) lo = mid
+      else hi = mid
     }
 
-    let isDown = false
+    const dl = Math.abs(candles[lo]!.time - t)
+    const dh = Math.abs(candles[hi]!.time - t)
+    return dh < dl ? hi : lo
+  }
 
-    const onPointerDown = (e: PointerEvent) => {
-      if (tool === 'none') return
-      const p = toPoint(e.clientX, e.clientY)
-      if (!p) return
+  const timeFromLogical = (logical: number, candles: { time: number }[]) => {
+    if (candles.length === 0) return null
 
-      if (tool === 'alert') {
-        setAlertDefaultPrice(p.price)
-        setAlertModalOpen(true)
-        return
-      }
+    const lastIdx = candles.length - 1
+    const firstTime = candles[0]!.time
+    const lastTime = candles[lastIdx]!.time
 
-      if (tool === 'ray') {
-        addDrawing(config.drawingStateId, { id: newId(), type: 'ray', points: [{ time: p.time, price: p.price }], createdAt: Date.now() })
-        setTool('none')
-        return
-      }
+    if (logical <= 0) return firstTime + logical * intervalSeconds
+    if (logical >= lastIdx) return lastTime + (logical - lastIdx) * intervalSeconds
 
-      if (tool === 'trendline') {
-        if (!pendingPoint) {
-          setPendingPoint({ time: p.time, price: p.price })
-          setPreview({ type: 'trendline', points: [{ time: p.time, price: p.price }, { time: p.time, price: p.price }] })
-          return
+    const idx = Math.min(lastIdx, Math.max(0, Math.round(logical)))
+    return candles[idx]!.time
+  }
+
+  const toPoint = (clientX: number, clientY: number) => {
+    const container = containerRef.current
+    const chart = chartRef.current
+    const series = candleSeriesRef.current
+    if (!container || !chart || !series) return null
+
+    const rect = container.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
+
+    const timeScale: any = chart.timeScale()
+    const timeRaw = timeScale.coordinateToTime(x)
+    let time = timeToUnixSec(timeRaw)
+
+    // If coordinateToTime clamps to first/last bar, allow "future/past" mapping.
+    const candles = candlesRef.current
+    if (candles.length > 0) {
+      const firstTime = candles[0]!.time
+      const lastIdx = candles.length - 1
+      const lastTime = candles[lastIdx]!.time
+
+      const xFirst = timeScale.timeToCoordinate?.(firstTime as any)
+      const xLast = timeScale.timeToCoordinate?.(lastTime as any)
+
+      if (typeof xFirst === 'number' && x < xFirst - 2) time = null
+      if (typeof xLast === 'number' && x > xLast + 2) time = null
+    }
+
+    // Support drawing/dragging into "future" space (right of last bar).
+    if (time == null) {
+      if (candles.length > 0) {
+        const r = timeScale.getVisibleLogicalRange?.()
+        if (r && typeof r.from === 'number' && typeof r.to === 'number' && r.to !== r.from) {
+          const width = container.clientWidth
+          if (Number.isFinite(width) && width > 0) {
+            const from = Math.min(r.from, r.to)
+            const to = Math.max(r.from, r.to)
+            const xClamped = Math.min(width, Math.max(0, x))
+            const logical = from + (xClamped / width) * (to - from)
+            time = timeFromLogical(logical, candles)
+          }
         }
+      }
+    }
 
+    const price = series.coordinateToPrice(y)
+    if (time == null || price == null) return null
+    return { time, price: Number(price), x, y }
+  }
+
+  const coordFns = () => getCoordFns()
+
+  const shouldIgnorePointerTarget = (target: EventTarget | null) => {
+    const el = target as HTMLElement | null
+    if (!el) return false
+    return Boolean(el.closest('button, a, input, textarea, select'))
+  }
+
+  const onChartPointerDownCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (shouldIgnorePointerTarget(e.target)) return
+    if (e.button !== 0) return
+
+    const p = toPoint(e.clientX, e.clientY)
+    if (!p) return
+
+    const chart = chartRef.current
+    if (!chart) return
+
+    // Measure: hold Shift + drag.
+    if (tool === 'none' && e.shiftKey) {
+      measureActiveRef.current = true
+      rectDragRef.current = true
+      setPendingPoint({ time: p.time, price: p.price })
+      setPreview({ type: 'rect', points: [{ time: p.time, price: p.price }, { time: p.time, price: p.price }], label: '' })
+
+      try {
+        ;(e.currentTarget as any).setPointerCapture?.(e.pointerId)
+      } catch {
+        // ignore
+      }
+
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    // No tool: drag existing drawings if hit-test succeeds; otherwise allow chart pan.
+    if (tool === 'none') {
+      const fns = coordFns()
+      if (!fns) return
+
+      const hit = hitTestDrawing(drawings, p.x, p.y, fns, HIT_THRESHOLD_PX)
+      if (!hit) return
+
+      dragStateRef.current = {
+        id: hit.id,
+        type: hit.type,
+        createdAt: hit.createdAt,
+        start: { time: p.time, price: p.price },
+        orig: hit.points.map((pt) => ({ time: pt.time, price: pt.price })),
+      }
+
+      try {
+        ;(e.currentTarget as any).setPointerCapture?.(e.pointerId)
+      } catch {
+        // ignore
+      }
+
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (tool === 'alert') {
+      setAlertDefaultPrice(p.price)
+      setAlertModalOpen(true)
+      setTool('none')
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (tool === 'ray') {
+      addDrawing(config.drawingStateId, { id: newId(), type: 'ray', points: [{ time: p.time, price: p.price }], createdAt: Date.now() })
+      setTool('none')
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (tool === 'rect') {
+      rectDragRef.current = true
+      setPendingPoint({ time: p.time, price: p.price })
+      setPreview({ type: 'rect', points: [{ time: p.time, price: p.price }, { time: p.time, price: p.price }] })
+
+      try {
+        ;(e.currentTarget as any).setPointerCapture?.(e.pointerId)
+      } catch {
+        // ignore
+      }
+
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (tool === 'trendline') {
+      if (!pendingPoint) {
+        setPendingPoint({ time: p.time, price: p.price })
+        setPreview({ type: 'trendline', points: [{ time: p.time, price: p.price }, { time: p.time, price: p.price }] })
+      } else {
         addDrawing(config.drawingStateId, {
           id: newId(),
           type: 'trendline',
           points: [pendingPoint, { time: p.time, price: p.price }],
           createdAt: Date.now(),
         })
+        setTool('none')
         setPendingPoint(null)
         setPreview(null)
-        setTool('none')
-        return
       }
 
-      if (tool === 'rect' || tool === 'measure') {
-        isDown = true
-        setPendingPoint({ time: p.time, price: p.price })
-        setPreview({ type: 'rect', points: [{ time: p.time, price: p.price }, { time: p.time, price: p.price }] })
-      }
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }
+
+  const onChartPointerMoveCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // Keep drawings in sync when user drags price scale.
+    if (!dragStateRef.current && !rectDragRef.current && !pendingPoint && (drawings.length > 0 || preview) && e.buttons) {
+      overlayRenderRef.current?.()
     }
 
-    const onPointerMove = (e: PointerEvent) => {
-      if (tool === 'none') return
-      if (!pendingPoint) return
+    const p = toPoint(e.clientX, e.clientY)
+    if (!p) return
 
-      const p = toPoint(e.clientX, e.clientY)
-      if (!p) return
+    if (dragStateRef.current) {
+      dragLatestRef.current = { time: p.time, price: p.price }
 
-      if (tool === 'trendline') {
-        setPreview({ type: 'trendline', points: [pendingPoint, { time: p.time, price: p.price }] })
-        return
+      if (dragRafRef.current == null) {
+        dragRafRef.current = window.requestAnimationFrame(() => {
+          dragRafRef.current = null
+          const st = dragStateRef.current
+          const latest = dragLatestRef.current
+          if (!st || !latest) return
+
+          const dt = latest.time - st.start.time
+          const dp = latest.price - st.start.price
+
+          upsertDrawing(config.drawingStateId, {
+            id: st.id,
+            type: st.type,
+            points: st.orig.map((pt) => ({ time: pt.time + dt, price: pt.price + dp })),
+            createdAt: st.createdAt,
+          })
+        })
       }
 
-      if (tool === 'rect' || tool === 'measure') {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (!pendingPoint) return
+
+    if (rectDragRef.current) {
+      if (measureActiveRef.current) {
+        const pct = pendingPoint.price !== 0 ? ((p.price - pendingPoint.price) / pendingPoint.price) * 100 : 0
+        const seconds = Math.abs(p.time - pendingPoint.time)
+        const mins = Math.round(seconds / 60)
+        const bars = Math.max(0, Math.round(seconds / intervalSeconds))
+        const label = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%\n${mins}m\n${bars} bars`
+
+        setPreview({ type: 'rect', points: [pendingPoint, { time: p.time, price: p.price }], label })
+      } else {
         setPreview({ type: 'rect', points: [pendingPoint, { time: p.time, price: p.price }] })
       }
+
+      e.preventDefault()
+      e.stopPropagation()
+      return
     }
 
-    const onPointerUp = (e: PointerEvent) => {
-      if (!isDown) return
-      isDown = false
+    if (tool === 'trendline') {
+      setPreview({ type: 'trendline', points: [pendingPoint, { time: p.time, price: p.price }] })
+    }
+  }
 
-      const p = toPoint(e.clientX, e.clientY)
-      if (!p || !pendingPoint) {
-        setPendingPoint(null)
-        setPreview(null)
-        return
+  const onChartPointerUpCapture = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragStateRef.current) {
+      dragStateRef.current = null
+      dragLatestRef.current = null
+      if (dragRafRef.current != null) {
+        window.cancelAnimationFrame(dragRafRef.current)
+        dragRafRef.current = null
       }
 
-      if (tool === 'rect') {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (!rectDragRef.current) return
+
+    const p = toPoint(e.clientX, e.clientY)
+    if (!p || !pendingPoint) {
+      rectDragRef.current = false
+      measureActiveRef.current = false
+      setPendingPoint(null)
+      setPreview(null)
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (!measureActiveRef.current && tool === 'rect') {
+      if (p.time !== pendingPoint.time || p.price !== pendingPoint.price) {
         addDrawing(config.drawingStateId, {
           id: newId(),
           type: 'rect',
           points: [pendingPoint, { time: p.time, price: p.price }],
           createdAt: Date.now(),
         })
-        setTool('none')
       }
-
-      // measure is ephemeral.
-      setPendingPoint(null)
-      setPreview(null)
+      setTool('none')
     }
 
-    const onDblClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+    rectDragRef.current = false
+    measureActiveRef.current = false
+    setPendingPoint(null)
+    setPreview(null)
 
-      const hit = hitTestDrawing(drawings, x, y, {
-        timeToX: (t) => {
-          const v = chart.timeScale().timeToCoordinate(t as any)
-          return typeof v === 'number' ? v : null
-        },
-        priceToY: (p) => {
-          const v = series.priceToCoordinate(p)
-          return typeof v === 'number' ? v : null
-        },
-      })
+    e.preventDefault()
+    e.stopPropagation()
+  }
 
-      if (hit) removeDrawing(config.drawingStateId, hit.id)
-    }
+  const onChartDoubleClickCapture = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const p = toPoint(e.clientX, e.clientY)
+    if (!p) return
 
-    canvas.addEventListener('pointerdown', onPointerDown)
-    canvas.addEventListener('pointermove', onPointerMove)
-    window.addEventListener('pointerup', onPointerUp)
-    canvas.addEventListener('dblclick', onDblClick)
+    const fns = coordFns()
+    if (!fns) return
 
-    return () => {
-      canvas.removeEventListener('pointerdown', onPointerDown)
-      canvas.removeEventListener('pointermove', onPointerMove)
-      window.removeEventListener('pointerup', onPointerUp)
-      canvas.removeEventListener('dblclick', onDblClick)
-    }
-  }, [addDrawing, config.drawingStateId, drawings, pendingPoint, removeDrawing, tool])
+    const hit = hitTestDrawing(drawings, p.x, p.y, fns, HIT_THRESHOLD_PX)
+    if (!hit) return
+
+    removeDrawing(config.drawingStateId, hit.id)
+
+    e.preventDefault()
+    e.stopPropagation()
+  }
 
   // Keyboard shortcuts for tools
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!selected) return
+      if (!selected && !hovered) return
       if (e.shiftKey && e.code === 'KeyS') {
         e.preventDefault()
         setTool('trendline')
@@ -966,29 +1258,37 @@ export default function TerminalChartTile({ config, market, height, selected, on
         e.preventDefault()
         setTool('ray')
       }
-      if (e.shiftKey && e.code === 'KeyR') {
+      if (e.shiftKey && e.code === 'KeyA') {
         e.preventDefault()
-        setTool('rect')
+        setTool('alert')
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selected])
+  }, [hovered, selected])
 
-  const toolButton = (label: string, nextTool: DrawingTool) => (
+  const toolButton = (label: string, nextTool: DrawingTool, title: string) => (
     <button
       type="button"
-      className={`w-8 h-8 rounded-lg border flex items-center justify-center text-[10px] ${
+      className={`w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] ${
         tool === nextTool
           ? 'bg-primary-600 border-primary-500 text-white'
           : 'bg-dark-900/60 border-dark-700 text-dark-300 hover:text-white hover:bg-dark-700'
       }`}
       onClick={() => setTool((t) => (t === nextTool ? 'none' : nextTool))}
-      title={label}
+      title={title}
     >
       {label}
     </button>
   )
+
+  const clearAllDrawings = () => {
+    setDrawings(config.drawingStateId, [])
+    measureActiveRef.current = false
+    setTool('none')
+    setPendingPoint(null)
+    setPreview(null)
+  }
 
   const indicatorChip = (label: string, key: keyof ChartConfig['ui']['indicators']) => {
     const active = !!config.ui.indicators[key]
@@ -1055,6 +1355,13 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
       <div
         className="relative"
+        onPointerDownCapture={onChartPointerDownCapture}
+        onPointerMoveCapture={onChartPointerMoveCapture}
+        onPointerUpCapture={onChartPointerUpCapture}
+        onDoubleClickCapture={onChartDoubleClickCapture}
+        onWheelCapture={() => {
+          if (drawings.length > 0 || preview) overlayRenderRef.current?.()
+        }}
         onMouseDown={(e: ReactMouseEvent) => {
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault()
@@ -1078,22 +1385,34 @@ export default function TerminalChartTile({ config, market, height, selected, on
         <div ref={containerRef} style={{ height }} />
 
         {/* Drawing canvas overlay */}
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0"
-          style={{ pointerEvents: tool === 'none' ? 'none' : 'auto' }}
-        />
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0 z-20"
+            style={{ pointerEvents: 'none' }}
+          />
+
 
         {/* Hover toolbar */}
-        {hovered && (
-          <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-20">
-            {toolButton('Alert', 'alert')}
-            {toolButton('TL', 'trendline')}
-            {toolButton('Ray', 'ray')}
-            {toolButton('Rect', 'rect')}
-            {toolButton('Meas', 'measure')}
+          {hovered && (
+          <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30">
+            <button
+              type="button"
+              className="w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] bg-dark-900/60 border-dark-700 text-dark-300 hover:text-white hover:bg-dark-700"
+              onClick={clearAllDrawings}
+              title="Clear drawings"
+            >
+              🪣
+            </button>
+            {toolButton('Alert', 'alert', 'Alert (Shift+A)')}
+            {toolButton('TL', 'trendline', 'Trendline (Shift+S)')}
+            {toolButton('Ray', 'ray', 'Horizontal Ray (Shift+D)')}
+            {toolButton('Rect', 'rect', 'Rectangle (click twice or drag)')}
+            <div className="w-9 h-9 rounded-lg border bg-dark-900/60 border-dark-700 text-dark-300 flex items-center justify-center text-[10px]" title="Measure (hold Shift + drag)">
+              Meas
+            </div>
           </div>
         )}
+
       </div>
 
       <PriceAlertModal

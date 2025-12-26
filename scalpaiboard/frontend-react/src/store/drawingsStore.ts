@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-export type DrawingTool = 'none' | 'trendline' | 'ray' | 'rect' | 'measure' | 'alert'
+export type DrawingTool = 'none' | 'line' | 'trendline' | 'ray' | 'rect' | 'measure' | 'alert'
 
 export type DrawingPoint = {
   time: number
@@ -10,7 +10,7 @@ export type DrawingPoint = {
 
 export type Drawing = {
   id: string
-  type: 'trendline' | 'ray' | 'rect'
+  type: 'line' | 'trendline' | 'ray' | 'rect'
   points: DrawingPoint[]
   createdAt: number
 }
