@@ -127,11 +127,8 @@ export const useTerminalChartStore = create<TerminalChartState>()(
         const charts = get().charts
         const next: Record<string, ChartConfig> = {}
         for (const [id, cfg] of Object.entries(charts)) {
-          if (cfg.timeframeMode === 'global') {
-            next[id] = { ...cfg, timeframe: tf, drawingStateId: `${cfg.marketId}:${tf}` }
-          } else {
-            next[id] = cfg
-          }
+          // No per-tile timeframe UI right now; treat timeframe as global.
+          next[id] = { ...cfg, timeframeMode: 'global', timeframe: tf, drawingStateId: `${cfg.marketId}:${tf}` }
         }
         set({ charts: next })
       },

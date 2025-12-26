@@ -149,7 +149,7 @@ export default function FocusModeFullscreenChart() {
   if (!focus.open || !renderConfig || !renderMarket) return null
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[90] bg-black/70">
       <div className="absolute inset-3 bg-dark-900 border border-dark-700 rounded-2xl overflow-hidden flex flex-col">
         <div className="h-16 px-4 flex items-center justify-between border-b border-dark-700 gap-4">
           <div className="min-w-0">

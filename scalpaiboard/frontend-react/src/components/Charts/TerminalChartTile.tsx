@@ -61,6 +61,18 @@ const normalizeCandles = (data: Candle[]): Candle[] => {
   return out
 }
 
+const guessPricePrecision = (price: number) => {
+  if (!Number.isFinite(price) || price === 0) return { precision: 2, minMove: 0.01 }
+
+  const abs = Math.abs(price)
+  if (abs >= 1000) return { precision: 2, minMove: 0.01 }
+  if (abs >= 100) return { precision: 2, minMove: 0.01 }
+  if (abs >= 10) return { precision: 3, minMove: 0.001 }
+  if (abs >= 1) return { precision: 4, minMove: 0.0001 }
+  if (abs >= 0.1) return { precision: 5, minMove: 0.00001 }
+  return { precision: 6, minMove: 0.000001 }
+}
+
 type Props = {
   config: ChartConfig
   market: MarketItem
@@ -82,6 +94,20 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
   const [chartReady, setChartReady] = useState(false)
   const [candlesVersion, setCandlesVersion] = useState(0)
+
+  const priceFormatRef = useRef<{ precision: number; minMove: number } | null>(null)
+  const applyPriceFormat = (price: number) => {
+    const next = guessPricePrecision(price)
+    const prev = priceFormatRef.current
+    if (prev && prev.precision === next.precision && prev.minMove === next.minMove) return
+
+    priceFormatRef.current = next
+    try {
+      candleSeriesRef.current?.applyOptions({ priceFormat: { type: 'price', precision: next.precision, minMove: next.minMove } } as any)
+    } catch {
+      // ignore
+    }
+  }
 
   const loadMoreInFlightRef = useRef(false)
   const reachedHistoryStartRef = useRef(false)
@@ -280,6 +306,7 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
         const last = normalized[normalized.length - 1]
         if (last) {
+          applyPriceFormat(last.close)
           lastBarRef.current = {
             time: last.time,
             open: last.open,
@@ -414,13 +441,15 @@ export default function TerminalChartTile({ config, market, height, selected, on
     const barTime = Math.floor(ticker.timestamp / intervalSeconds) * intervalSeconds
     if (barTime < last.time) return
 
-    if (barTime === last.time) {
-      const next = {
-        ...last,
-        high: Math.max(last.high, price),
-        low: Math.min(last.low, price),
-        close: price,
-      }
+     if (barTime === last.time) {
+       applyPriceFormat(price)
+       const next = {
+         ...last,
+         high: Math.max(last.high, price),
+         low: Math.min(last.low, price),
+         close: price,
+       }
+
       candleSeriesRef.current.update({
         time: next.time as any,
         open: next.open,
@@ -438,6 +467,8 @@ export default function TerminalChartTile({ config, market, height, selected, on
 
       return
     }
+
+    applyPriceFormat(price)
 
     const next = {
       time: barTime,
@@ -562,6 +593,9 @@ export default function TerminalChartTile({ config, market, height, selected, on
           color: 'rgba(59, 130, 246, 0.9)',
           lineWidth: 2,
           priceScaleId: 'right',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
         })
       }
       if (!ema50Ref.current) {
@@ -569,6 +603,9 @@ export default function TerminalChartTile({ config, market, height, selected, on
           color: 'rgba(168, 85, 247, 0.9)',
           lineWidth: 2,
           priceScaleId: 'right',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
         })
       }
 
@@ -588,6 +625,9 @@ export default function TerminalChartTile({ config, market, height, selected, on
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           priceScaleId: 'right',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
         })
       }
       if (!bbMiddleRef.current) {
@@ -595,6 +635,9 @@ export default function TerminalChartTile({ config, market, height, selected, on
           color: 'rgba(234, 179, 8, 0.7)',
           lineWidth: 1,
           priceScaleId: 'right',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
         })
       }
       if (!bbLowerRef.current) {
@@ -603,6 +646,9 @@ export default function TerminalChartTile({ config, market, height, selected, on
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
           priceScaleId: 'right',
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
         })
       }
 

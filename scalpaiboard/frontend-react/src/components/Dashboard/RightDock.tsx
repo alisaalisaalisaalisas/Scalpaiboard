@@ -1,8 +1,7 @@
 import { type ReactNode } from 'react'
-import { Bot, List, X } from 'lucide-react'
+import { Bot, X } from 'lucide-react'
 
 import AIChat from '../AIChat/ChatInterface'
-import MarketSearchPanel from './MarketSearchPanel'
 import { useRightPanelStore } from '../../store/rightPanelStore'
 
 function DockButton({
@@ -54,27 +53,15 @@ function PanelShell({ title, onClose, children }: { title: string; onClose: () =
 export default function RightDock() {
   const activePanel = useRightPanelStore((s) => s.activePanel)
   const toggleChat = useRightPanelStore((s) => s.toggleChat)
-  const toggleMarkets = useRightPanelStore((s) => s.toggleMarkets)
   const close = useRightPanelStore((s) => s.close)
 
   return (
     <div className="border-l border-dark-700 hidden lg:flex h-full min-h-0">
       <div className="w-12 h-full flex flex-col items-center pt-3 gap-2 bg-dark-900">
-        <DockButton active={activePanel === 'markets'} title="Markets" onClick={toggleMarkets}>
-          <List className="w-4 h-4" />
-        </DockButton>
         <DockButton active={activePanel === 'chat'} title="AI Assistant" onClick={toggleChat}>
           <Bot className="w-4 h-4" />
         </DockButton>
       </div>
-
-      {activePanel === 'markets' && (
-        <div className="w-[420px] h-full min-h-0">
-          <PanelShell title="Markets" onClose={close}>
-            <MarketSearchPanel />
-          </PanelShell>
-        </div>
-      )}
 
       {activePanel === 'chat' && (
         <div className="w-[400px] h-full min-h-0">

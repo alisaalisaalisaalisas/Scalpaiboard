@@ -38,6 +38,8 @@ export default function TerminalChartGrid() {
   const subscribe = useTerminalTickerStore((s) => s.subscribe)
   const unsubscribe = useTerminalTickerStore((s) => s.unsubscribe)
 
+  const focusOpen = useTerminalChartStore((s) => s.focus.open)
+
   const { cols, rows, size } = getLayoutSize(layout)
 
   useEffect(() => {
@@ -127,12 +129,13 @@ export default function TerminalChartGrid() {
   const lastSubscribed = useRef<string[]>([])
 
   useEffect(() => {
+    if (focusOpen) return
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${wsProtocol}//${window.location.host}/ws`
     if (!connected) {
       connect(url)
     }
-  }, [connect, connected])
+  }, [connect, connected, focusOpen])
 
   const charts = useTerminalChartStore((s) => s.charts)
 
@@ -167,6 +170,10 @@ export default function TerminalChartGrid() {
   }, [markets])
 
   const displayedIds = useMemo(() => {
+    if (watchlistOnly) {
+      return pageSlice.map((m) => m.marketId)
+    }
+
     const ids: string[] = []
     for (let idx = 0; idx < size; idx += 1) {
       const id = getChartIdForIndex(idx)
@@ -174,7 +181,7 @@ export default function TerminalChartGrid() {
       if (cfg?.marketId) ids.push(cfg.marketId)
     }
     return Array.from(new Set(ids))
-  }, [charts, size])
+  }, [charts, pageSlice, size, watchlistOnly])
 
   useEffect(() => {
     const ids = displayedIds
@@ -182,13 +189,18 @@ export default function TerminalChartGrid() {
     const prev = lastSubscribed.current
     if (prev.length > 0) unsubscribe(prev)
 
+    if (focusOpen) {
+      lastSubscribed.current = []
+      return
+    }
+
     if (ids.length > 0) subscribe(ids)
     lastSubscribed.current = ids
 
     return () => {
       if (ids.length > 0) unsubscribe(ids)
     }
-  }, [displayedIds, subscribe, unsubscribe])
+  }, [displayedIds, focusOpen, subscribe, unsubscribe])
 
   return (
     <div className="h-full flex flex-col">
@@ -196,6 +208,8 @@ export default function TerminalChartGrid() {
         {error && <div className="mb-3 text-sm text-red-400">{error}</div>}
         {loading && markets.length === 0 ? (
           <div className="text-sm text-dark-400">Loading markets…</div>
+        ) : watchlistOnly && watchlist.length === 0 ? (
+          <div className="h-full flex items-center justify-center text-sm text-dark-400">Watchlist is empty</div>
         ) : (
           <div
             className="grid gap-4"
@@ -203,6 +217,31 @@ export default function TerminalChartGrid() {
           >
             {Array.from({ length: size }).map((_, idx) => {
               const id = getChartIdForIndex(idx)
+
+              if (watchlistOnly) {
+                const market = pageSlice[idx]
+                const cfg = charts[id]
+
+                // Avoid showing mismatched symbol/config while store applies markets.
+                if (!market || !cfg || cfg.marketId !== market.marketId) {
+                  return (
+                    <div key={id} className="bg-dark-800 border border-dark-700 rounded-xl" style={{ height: chartHeight + 96 }} />
+                  )
+                }
+
+                return (
+                  <TerminalChartTile
+                    key={id}
+                    config={cfg}
+                    market={market}
+                    height={chartHeight}
+                    selected={selectedChartId === id}
+                    onSelect={() => setSelectedChartId(id)}
+                    onOpenFocus={() => openFocusFromTile(id)}
+                  />
+                )
+              }
+
               const cfg = charts[id]
               const market = cfg ? marketById.get(cfg.marketId) || pageSlice[idx] : pageSlice[idx]
               if (!cfg || !market) {

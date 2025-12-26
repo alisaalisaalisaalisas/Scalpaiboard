@@ -37,9 +37,11 @@ type Hub struct {
 
 // Client represents a single WebSocket connection
 type Client struct {
-	hub           *Hub
-	conn          *websocket.Conn
-	send          chan []byte
+	hub  *Hub
+	conn *websocket.Conn
+	send chan []byte
+
+	subMu         sync.RWMutex
 	subscriptions map[string]bool
 }
 
@@ -138,6 +140,7 @@ func (c *Client) readPump() {
 			}
 
 			if msg.Type == "subscribe" {
+				c.subMu.Lock()
 				for _, item := range items {
 					key := strings.TrimSpace(item)
 					if key == "" {
@@ -149,7 +152,9 @@ func (c *Client) readPump() {
 					}
 					c.subscriptions[key] = true
 				}
+				c.subMu.Unlock()
 			} else if msg.Type == "unsubscribe" {
+				c.subMu.Lock()
 				for _, item := range items {
 					key := strings.TrimSpace(item)
 					if key == "" {
@@ -160,6 +165,7 @@ func (c *Client) readPump() {
 					}
 					delete(c.subscriptions, key)
 				}
+				c.subMu.Unlock()
 			}
 		}
 	}
@@ -190,52 +196,103 @@ func (c *Client) writePump() {
 	}
 }
 
-// startMarketDataStream broadcasts tickers for subscribed markets.
+// startMarketDataStream sends tickers only to subscribed clients.
 func startMarketDataStream(hub *Hub) {
-	ticker := time.NewTicker(500 * time.Millisecond)
+	// 250ms target update cadence (note: REST polling may rate-limit).
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
+	const workers = 10
+
 	for range ticker.C {
-		// Build a unique set of marketIds subscribed by any client.
+		// Snapshot all clients and their subscriptions.
 		hub.mu.RLock()
-		subs := make(map[string]bool)
+		clients := make([]*Client, 0, len(hub.clients))
+		union := make(map[string]bool)
 		for client := range hub.clients {
+			clients = append(clients, client)
+
+			client.subMu.RLock()
 			for marketID := range client.subscriptions {
-				subs[marketID] = true
+				union[marketID] = true
 			}
+			client.subMu.RUnlock()
 		}
 		hub.mu.RUnlock()
 
-		if len(subs) == 0 {
+		if len(union) == 0 || len(clients) == 0 {
 			continue
 		}
 
-		for marketID := range subs {
-			exchange, marketType, symbol, ok := parseMarketID(marketID)
-			if !ok {
-				continue
-			}
+		// Fetch each market ticker once (parallel).
+		sem := make(chan struct{}, workers)
+		resultsMu := sync.Mutex{}
+		payloadByMarket := make(map[string][]byte, len(union))
 
-			price, changePct, volume24h, err := fetchTicker(exchange, marketType, symbol)
-			if err != nil {
-				continue
-			}
+		wg := sync.WaitGroup{}
+		now := time.Now().Unix()
 
-			msg := map[string]interface{}{
-				"type":       "ticker",
-				"marketId":   marketID,
-				"symbol":     symbol,
-				"exchange":   exchange,
-				"marketType": marketType,
-				"price":      price,
-				"change24h":  changePct,
-				"volume24h":  volume24h,
-				"timestamp":  time.Now().Unix(),
-			}
+		for marketID := range union {
+			marketID := marketID
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
 
-			if payload, err := json.Marshal(msg); err == nil {
-				hub.broadcast <- payload
-			}
+				exchange, marketType, symbol, ok := parseMarketID(marketID)
+				if !ok {
+					return
+				}
+
+				price, changePct, volume24h, err := fetchTicker(exchange, marketType, symbol)
+				if err != nil {
+					return
+				}
+
+				msg := map[string]interface{}{
+					"type":       "ticker",
+					"marketId":   marketID,
+					"symbol":     symbol,
+					"exchange":   exchange,
+					"marketType": marketType,
+					"price":      price,
+					"change24h":  changePct,
+					"volume24h":  volume24h,
+					"timestamp":  now,
+				}
+
+				payload, err := json.Marshal(msg)
+				if err != nil {
+					return
+				}
+
+				resultsMu.Lock()
+				payloadByMarket[marketID] = payload
+				resultsMu.Unlock()
+			}()
 		}
+
+		wg.Wait()
+
+		// Deliver only to clients that subscribed.
+		hub.mu.RLock()
+		for _, client := range clients {
+			client.subMu.RLock()
+			for marketID := range client.subscriptions {
+				payload := payloadByMarket[marketID]
+				if len(payload) == 0 {
+					continue
+				}
+
+				select {
+				case client.send <- payload:
+				default:
+					// Drop if client is slow.
+				}
+			}
+			client.subMu.RUnlock()
+		}
+		hub.mu.RUnlock()
 	}
 }
