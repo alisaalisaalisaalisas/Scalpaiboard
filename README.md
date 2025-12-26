@@ -1,7 +1,6 @@
 # 📊 Scalpaiboard - Professional AI-Powered Cryptocurrency Screener
 
-[![GitHub license](https://img.shields.io/github/license/Scalpaiboard/Scalpaiboard)](https://github.com/Scalpaiboard/Scalpaiboard/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Scalpaiboard/Scalpaiboard)](https://github.com/Scalpaiboard/Scalpaiboard/stargazers)
+![alt text](Screenshot_1.png)
 
 ## 🎯 Project Overview
 
