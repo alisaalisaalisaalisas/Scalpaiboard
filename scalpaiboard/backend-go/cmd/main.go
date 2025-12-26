@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
+	"github.com/robfig/cron/v3"
 
 	"github.com/scalpaiboard/backend/api/handlers"
 	"github.com/scalpaiboard/backend/api/middleware"
@@ -39,6 +40,21 @@ func main() {
 	alertService := service.NewAlertService(db)
 	watchlistService := service.NewWatchlistService(db)
 	exchangeService := service.NewExchangeService(rdb)
+
+	// Initialize notification and alert evaluator for cron jobs
+	notificationService := service.NewNotificationService()
+	alertEvaluator := service.NewAlertEvaluator(db, notificationService)
+
+	// Initialize cron scheduler for background jobs
+	cronScheduler := cron.New()
+	_, err = cronScheduler.AddFunc("@every 1m", alertEvaluator.EvaluateAllAlerts)
+	if err != nil {
+		log.Printf("⚠️ Failed to schedule alert evaluation: %v", err)
+	} else {
+		cronScheduler.Start()
+		log.Println("🕐 Alert evaluation cron started (every 1 minute)")
+	}
+	defer cronScheduler.Stop()
 
 	// Initialize handlers
 	coinHandler := handlers.NewCoinHandler(coinService, exchangeService)

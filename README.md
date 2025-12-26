@@ -4,14 +4,14 @@
 
 ## 🎯 Project Overview
 
-**Scalpaiboard** is a professional-grade cryptocurrency screener platform combining real-time market data analysis with an advanced AI trading assistant powered by GPT-4.
+**Scalpaiboard** is a professional-grade cryptocurrency screener platform combining real-time market data analysis with an advanced multi-provider AI trading assistant.
 
 ### What It Does
-- **Real-time Multi-Chart Dashboard**: Monitor lots of cryptocurrency pairs simultaneously
-- **Advanced Screener**: Filter 500+ coins using 50+ technical criteria
+- **Real-time Multi-Chart Dashboard**: Monitor multiple cryptocurrency pairs simultaneously
+- **Advanced Screener**: Filter coins using technical criteria
 - **Order Book Heatmap**: Visualize buy/sell pressure in real-time
-- **Automated Alerts**: Price, volume, and technical indicator alerts via Telegram/Email
-- **AI Trading Assistant**: Natural language interface for market analysis, pattern recognition, and automated trading decisions
+- **Automated Alerts**: Price, volume, and technical indicator alerts
+- **AI Trading Assistant**: Natural language interface supporting 10+ AI providers for market analysis
 
 ---
 
@@ -21,45 +21,44 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   Frontend (React 18)                       │
-│  Dashboard 70% + AI Chat 30% | Responsive Design           │
+│           Frontend (Vite 5 + React 18 + TailwindCSS)        │
+│       Dashboard + AI Chat | Responsive Design               │
 └──────────────────────┬──────────────────────────────────────┘
                        │
               NGINX Reverse Proxy (80/443)
                        │
-        ┌──────────────┴──────────────┐
-        │                             │
-   ┌────▼─────────────┐       ┌──────▼──────────┐
-   │  Go Backend      │       │ C# Backend      │
-   │  Port: 3001      │◄─────►│ Port: 3002      │
-   │                  │ gRPC  │                 │
-   │ • REST API       │       │ • GPT-4 AI      │
-   │ • WebSocket      │       │ • Alert Engine  │
-   │ • Exchange Data  │       │ • Analytics     │
-   │ • Caching        │       │ • Notifications │
-   └────┬─────────────┘       └──────┬──────────┘
-        │                            │
-        │         ┌──────────────────┘
-        │         │
-    ┌───┴─┬───────┴──┬───────┐
-    │     │          │       │
-┌───▼──┐ ┌▼────────┐ ┌─────▼──┐
-│Redis │ │PostgreSQL │ │Exchange│
-│Cache │ │Database  │ │APIs    │
-└──────┘ └──────────┘ └────────┘
+              ┌────────▼────────┐
+              │   Go Backend    │
+              │   Port: 3001    │
+              │                 │
+              │ • REST API      │
+              │ • WebSocket     │
+              │ • AI Chat (10+  │
+              │   providers)    │
+              │ • Alert Cron    │
+              │ • Exchange Data │
+              └────────┬────────┘
+                       │
+       ┌───────────────┼───────────────┐
+       │               │               │
+   ┌───▼──┐      ┌─────▼─────┐   ┌─────▼────┐
+   │Redis │      │PostgreSQL │   │ Exchange │
+   │Cache │      │ Database  │   │   APIs   │
+   └──────┘      └───────────┘   └──────────┘
 ```
 
 ### Technology Stack
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| **Frontend** | React 18 + TypeScript | Interactive dashboard |
-| **Backend (Primary)** | Go 1.23 + Gin | REST API + WebSocket Hub |
-| **Backend (Secondary)** | C# .NET 8 | Alert Engine + GPT-4 Integration |
-| **AI Engine** | OpenAI GPT-4 | Natural language processing |
+| **Frontend** | Vite 5 + React 18 + TypeScript + TailwindCSS | Interactive dashboard |
+| **Charts** | lightweight-charts | TradingView-style charts |
+| **State** | Zustand | Client state management |
+| **Backend** | Go 1.24 + Gin | REST API + WebSocket + AI Chat + Alert Cron |
+| **AI Chat** | Multi-provider (10+ APIs) | OpenAI, Anthropic, Google, xAI, DeepSeek, Mistral, Groq, etc. |
+| **Scheduler** | robfig/cron | Background alert evaluation |
 | **Database** | PostgreSQL 17 | Data persistence |
 | **Cache** | Redis 7 | Real-time caching |
-| **IPC** | gRPC | Service communication |
 | **Deployment** | Docker Compose | Containerization |
 
 ---
@@ -67,63 +66,55 @@
 ## 🚀 Features
 
 ### Screener Platform
-- ✅ Real-time multi-chart display (12+ coins)
-- ✅ 50+ advanced filtering criteria
+- ✅ Real-time multi-chart display
+- ✅ Advanced filtering by technical criteria
 - ✅ Order book heatmap visualization
 - ✅ Technical indicators (RSI, MACD, Bollinger Bands)
 - ✅ Watchlist management
 - ✅ Price/volume alerts
-- ✅ Export to CSV/JSON
 - ✅ Mobile responsive
 
 ### AI Trading Assistant
-- ✅ Natural language queries
-- ✅ Market analysis & signals
-- ✅ Automated alert creation
-- ✅ Watchlist management via chat
-- ✅ Pattern recognition
-- ✅ Portfolio tracking
-- ✅ 7+ built-in tools
-- ✅ Real-time streaming responses
+Supports **10+ AI Providers** with BYOK (Bring Your Own Key):
+- **OpenAI**: GPT-5.2, GPT-4o, GPT-4-turbo, GPT-3.5-turbo
+- **Anthropic**: Claude Opus 4.5, Claude Sonnet 4.5, Claude 3 family
+- **Google**: Gemini 3 Pro, Gemini 2.5 Pro/Flash
+- **xAI**: Grok 4.1, Grok 2
+- **DeepSeek**: V3.2, V3-0324, Coder
+- **Mistral**: Devstral 2, Large, Medium, Codestral
+- **Groq**: Llama 3.3-70B, Mixtral (fast inference)
+- **Together AI**: Llama, Mixtral, Qwen models
+- **OpenRouter**: Aggregator for 100+ models
+- **Xiaomi**: Mimo-v2-flash
+- **Kwaipilot**: Kat-coder-pro
 
 ### Real-Time Features
-- ✅ WebSocket streaming (1000+ concurrent users)
-- ✅ <500ms latency
+- ✅ WebSocket streaming
 - ✅ Live price updates
 - ✅ Order book snapshots
-- ✅ Alert notifications
-- ✅ AI responses
+- ✅ Alert notifications (Telegram, Email, In-app)
+- ✅ AI streaming responses
 
 ---
 
-## 📊 Performance Metrics
+## 📊 Project Structure
 
 ```
-API Response Time:        <200ms (p95)
-WebSocket Latency:        <500ms
-Chart Rendering:          60fps
-Concurrent Users:         1,000+
-Message Throughput:       10,000/sec
-Alert Accuracy:           100%
-Uptime Target:            99.9%
-Go Memory Usage:          80-120MB
-C# Memory Usage:          200-300MB
+scalpaiboard/
+├── frontend-react/     # Vite + React + TailwindCSS
+├── backend-go/         # Go + Gin (REST API, WebSocket, AI, Alerts)
+├── migrations/         # Database migrations
+├── nginx/              # Reverse proxy config
+└── docker-compose.yml  # Container orchestration
 ```
-
----
 
 ## 🔐 Security Features
 
 ✅ JWT Authentication  
 ✅ CORS Protection  
-✅ Rate Limiting (per user/endpoint)  
-✅ Input Validation & Sanitization  
+✅ Rate Limiting  
+✅ Input Validation  
 ✅ SQL Injection Prevention (ORM)  
-✅ XSS Protection  
-✅ HTTPS/TLS Encryption  
-✅ Database Encryption  
-✅ Audit Logging  
-✅ Role-Based Access Control (RBAC)  
 
 ## 🎓 Use Cases
 
@@ -131,35 +122,24 @@ C# Memory Usage:          200-300MB
 - Identify momentum coins in real-time
 - Set automated alerts for entry/exit points
 - Analyze multiple timeframes simultaneously
-- Track technical indicators across 12+ pairs
 
 **For Technical Analysts**
 - Advanced filtering by technical criteria
 - Order book pressure analysis
-- Pattern recognition (AI-powered)
-- Quick signal verification
+- AI-powered pattern recognition
 
 **For Portfolio Managers**
 - Monitor holdings across exchanges
 - Automated rebalancing alerts
 - Market condition analysis
-- Risk assessment tools
-
-**For Quantitative Traders**
-- Real-time data access via API
-- Custom indicator implementation
-- Backtesting support
-- Automated strategy execution
-
 
 ## 📄 License
 
 MIT License - Free for personal & commercial use
 
+---
 
 **Scalpaiboard - AI-Powered Cryptocurrency Intelligence Platform**
 
-*Created: December 23, 2025*  
-*Status: ✅ Production Ready*  
 *Version: 1.0*
 

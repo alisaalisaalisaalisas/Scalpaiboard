@@ -330,3 +330,15 @@ func (h *AIChatHandler) callGoogle(apiKey, model, message string, maxTokens int,
 
 	return strings.Join(parts, ""), nil
 }
+
+// ListConversations returns user's AI conversation history
+func ListConversations(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// TODO: Implement conversation history storage
+	c.JSON(http.StatusOK, []interface{}{})
+}

@@ -39,7 +39,7 @@ services:
     networks:
       - scalpaiboard-network
 
-  # Go Backend (REST API + WebSocket)
+  # Go Backend (REST API + WebSocket + Alert Cron)
   backend-go:
     build:
       context: ./backend-go
@@ -47,7 +47,6 @@ services:
     container_name: scalpaiboard-go
     ports:
       - "3001:3001"
-      - "50051:50051"
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -55,10 +54,10 @@ services:
       DB_USER: ${DB_USER:-scalpaiboard}
       DB_PASSWORD: ${DB_PASSWORD:-scalpaiboard_dev}
       REDIS_URL: redis://redis:6379
-      GRPC_CSHARP_ADDR: backend-csharp:50052
       JWT_SECRET: ${JWT_SECRET:-dev_jwt_secret}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
       LOG_LEVEL: ${LOG_LEVEL:-debug}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,33 +67,6 @@ services:
     healthcheck:
       test:
         ["CMD", "wget", "-q", "--spider", "http://localhost:3001/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - scalpaiboard-network
-
-  # C# Backend (Alert Engine + AI)
-  backend-csharp:
-    build:
-      context: ./backend-csharp
-      dockerfile: Dockerfile
-    container_name: scalpaiboard-csharp
-    ports:
-      - "3002:3002"
-      - "50052:50052"
-    environment:
-      ConnectionStrings__DefaultConnection: "Host=postgres;Database=${DB_NAME:-scalpaiboard};Username=${DB_USER:-scalpaiboard};Password=${DB_PASSWORD:-scalpaiboard_dev};Port=5432"
-      Redis__Connection: redis:6379
-      ASPNETCORE_ENVIRONMENT: Development
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 10s
       timeout: 5s
       retries: 3
