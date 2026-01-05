@@ -66,10 +66,11 @@ services:
     restart: unless-stopped
     healthcheck:
       test:
-        ["CMD", "wget", "-q", "--spider", "http://localhost:3001/api/health"]
-      interval: 10s
-      timeout: 5s
+        ["CMD-SHELL", "wget -q -O- http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
       retries: 3
+      start_period: 10s
     networks:
       - scalpaiboard-network
 
