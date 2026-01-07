@@ -517,7 +517,7 @@ export const SettingsPage: React.FC = () => {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-white">AI Assistant</h2>
-            <p className="text-sm text-gray-400">Example prompts and what the assistant can help with</p>
+            <p className="text-sm text-gray-400">Tools, that AI assistant can use to answer your questions (works only with api providers, that support it)</p>
           </div>
           <button
             type="button"
@@ -537,6 +537,11 @@ export const SettingsPage: React.FC = () => {
               <li>• Analyze BTC on 1h timeframe</li>
               <li>• Summarize today’s market movers</li>
               <li>• Explain RSI + show how to use it</li>
+              <li>• Add DOGE to my watchlist</li>
+              <li>• Create alert when ETH drops below $2000</li>
+              <li>• Any patterns on SOL?</li>
+              <li>• Show my portfolio</li>
+              <li>• Export my alerts</li>
             </ul>
           </div>
           <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3">
